@@ -389,11 +389,11 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="form-row" style="margin-bottom:0;">
             <label>👗 Fashion category maps to</label>
-            <input type="text" id="miles_fashion_cats" value="Luxury Fashion, Clothing &amp; Apparel" placeholder="e.g. Luxury Fashion, Clothing &amp; Apparel">
+            <input type="text" id="miles_fashion_cats" value="Fashion" placeholder="e.g. Fashion">
           </div>
           <div class="form-row" style="margin-bottom:0;">
             <label>🍽️ Dining category maps to</label>
-            <input type="text" id="miles_dining_cats" value="Fine Dining, Casual Dining, Cafes &amp; Coffee" placeholder="e.g. Fine Dining, Casual Dining, Cafes &amp; Coffee">
+            <input type="text" id="miles_dining_cats" value="Dining Out" placeholder="e.g. Dining Out">
           </div>
         </div>
         <div style="font-size:11px;color:var(--small);margin-top:8px;">Enter budget category names separated by commas. These determine which UOB Lady's transactions count toward each miles cap.</div>
@@ -475,8 +475,8 @@
     <div class="import-hint">
       <div class="hint-label">Expected format</div>
 [<br>
-&nbsp;&nbsp;{"date":"2026-05-15","merchant":"Born Restaurant","category":"Fine Dining","card":"DBS Vantage","amount":120.50},<br>
-&nbsp;&nbsp;{"date":"2026-05-18","merchant":"Uniqlo","category":"Clothing & Apparel","card":"HSBC Revolution","amount":49.90}<br>
+&nbsp;&nbsp;{"date":"2026-05-15","merchant":"Born Restaurant","category":"Dining Out","card":"DBS Vantage","amount":120.50},<br>
+&nbsp;&nbsp;{"date":"2026-05-18","merchant":"Uniqlo","category":"Fashion","card":"HSBC Revolution","amount":49.90}<br>
 ]
     </div>
     <div class="form-row">
@@ -497,27 +497,36 @@
 <script>
 // ─── Data ───────────────────────────────────────────────────────────────────
 const CATEGORIES = [
-  { name: "Fine Dining",          emoji: "🍽️",  budget: 600,  fixed: false },
-  { name: "Casual Dining",        emoji: "🍜",  budget: 400,  fixed: false },
-  { name: "Food Delivery",        emoji: "🥡",  budget: 80,   fixed: false },
-  { name: "Cafes & Coffee",       emoji: "☕",  budget: 100,  fixed: false },
-  { name: "Groceries",            emoji: "🛒",  budget: 300,  fixed: false },
-  { name: "Luxury Fashion",       emoji: "👔",  budget: 300,  fixed: false },
-  { name: "Clothing & Apparel",   emoji: "👕",  budget: 150,  fixed: false },
-  { name: "Shopping & Beauty",    emoji: "💄",  budget: 200,  fixed: false },
-  { name: "Wellness (Pure Yoga)", emoji: "🧘",  budget: 241,  fixed: true  },
-  { name: "Fitness (Ally+Class)", emoji: "🏋️",  budget: 451,  fixed: true  },
-  { name: "Travel",               emoji: "✈️",  budget: 833,  fixed: false },
-  { name: "Entertainment",        emoji: "🎭",  budget: 100,  fixed: false },
-  { name: "Subscriptions",        emoji: "📱",  budget: 80,   fixed: true  },
-  { name: "Telco",                emoji: "📡",  budget: 90,   fixed: true  },
-  { name: "Transport",            emoji: "🚗",  budget: 300,  fixed: false },
-  { name: "Medical & Dental",     emoji: "🏥",  budget: 100,  fixed: false },
-  { name: "Lifestyle Services",   emoji: "🛵",  budget: 100,  fixed: false },
-  { name: "Personal Loan (Reno)", emoji: "🏠",  budget: 969,  fixed: true  },
-  { name: "Instalments (IPP)",    emoji: "💳",  budget: 336,  fixed: true  },
-  { name: "Other",                emoji: "📦",  budget: 200,  fixed: false },
+  { name: "Dining Out",            emoji: "🍽️",  budget: 1100, fixed: false },
+  { name: "Food Delivery",         emoji: "🥡",  budget: 80,   fixed: false },
+  { name: "Groceries",             emoji: "🛒",  budget: 300,  fixed: false },
+  { name: "Fashion",               emoji: "👗",  budget: 450,  fixed: false },
+  { name: "Shopping & Beauty",     emoji: "💄",  budget: 200,  fixed: false },
+  { name: "Health & Fitness",      emoji: "🏋️",  budget: 692,  fixed: true  },
+  { name: "Travel",                emoji: "✈️",  budget: 833,  fixed: false },
+  { name: "Entertainment",         emoji: "🎭",  budget: 100,  fixed: false },
+  { name: "Bills & Subscriptions", emoji: "📱",  budget: 170,  fixed: true  },
+  { name: "Transport",             emoji: "🚗",  budget: 300,  fixed: false },
+  { name: "Medical & Dental",      emoji: "🏥",  budget: 100,  fixed: false },
+  { name: "Debt & Instalments",    emoji: "🏠",  budget: 1305, fixed: true  },
+  { name: "Other",                 emoji: "📦",  budget: 300,  fixed: false },
 ];
+
+// Old → new category remapping for users with pre-consolidation data.
+const CATEGORY_MIGRATION = {
+  "Fine Dining":           "Dining Out",
+  "Casual Dining":         "Dining Out",
+  "Cafes & Coffee":        "Dining Out",
+  "Luxury Fashion":        "Fashion",
+  "Clothing & Apparel":    "Fashion",
+  "Wellness (Pure Yoga)":  "Health & Fitness",
+  "Fitness (Ally+Class)":  "Health & Fitness",
+  "Subscriptions":         "Bills & Subscriptions",
+  "Telco":                 "Bills & Subscriptions",
+  "Personal Loan (Reno)":  "Debt & Instalments",
+  "Instalments (IPP)":     "Debt & Instalments",
+  "Lifestyle Services":    "Other",
+};
 
 const CARDS = ["DBS Vantage","HSBC Revolution","UOB Lady's","UOB KrisFlyer","Cash"];
 const VALID_CATS = new Set(CATEGORIES.map(c => c.name));
@@ -540,8 +549,8 @@ let milesConfig = {
   uobLadyFashion: 750,
   uobLadyDining: 750,
   kfAnnual: 1000,
-  fashionCats: ['Luxury Fashion', 'Clothing & Apparel'],
-  diningCats: ['Fine Dining', 'Casual Dining', 'Cafes & Coffee'],
+  fashionCats: ['Fashion'],
+  diningCats: ['Dining Out'],
 };
 
 function storageKey(y, m) { return `txns_${y}_${String(m+1).padStart(2,'0')}`; }
@@ -549,7 +558,59 @@ function budgetKey() { return `budgets_liwen`; }
 function milesKey() { return `miles_config_liwen`; }
 
 // ─── Load / Save ──────────────────────────────────────────────────────────────
+function migrateStoredCategories() {
+  const mapName = n => CATEGORY_MIGRATION[n] || n;
+  const validNames = new Set(CATEGORIES.map(c => c.name));
+
+  // Transactions across every stored month
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith('txns_')) continue;
+    try {
+      const list = JSON.parse(localStorage.getItem(k));
+      if (!Array.isArray(list)) continue;
+      let changed = false;
+      list.forEach(t => {
+        const nc = mapName(t.category);
+        if (nc !== t.category) { t.category = nc; changed = true; }
+      });
+      if (changed) localStorage.setItem(k, JSON.stringify(list));
+    } catch (e) { /* skip malformed */ }
+  }
+
+  // Saved budgets: sum old-key values into their new-key buckets, drop stale keys
+  const rawB = localStorage.getItem(budgetKey());
+  if (rawB) {
+    try {
+      const old = JSON.parse(rawB);
+      const merged = {};
+      Object.entries(old).forEach(([k, v]) => {
+        const nk = mapName(k);
+        if (!validNames.has(nk)) return;
+        merged[nk] = (merged[nk] || 0) + (Number(v) || 0);
+      });
+      // Ensure every current category has a value (fall back to default)
+      CATEGORIES.forEach(c => { if (merged[c.name] === undefined) merged[c.name] = c.budget; });
+      localStorage.setItem(budgetKey(), JSON.stringify(merged));
+    } catch (e) { /* skip */ }
+  }
+
+  // Miles config cat-lists
+  const rawM = localStorage.getItem(milesKey());
+  if (rawM) {
+    try {
+      const m = JSON.parse(rawM);
+      const remap = arr => Array.isArray(arr) ? [...new Set(arr.map(mapName).filter(n => validNames.has(n)))] : arr;
+      m.fashionCats = remap(m.fashionCats);
+      m.diningCats = remap(m.diningCats);
+      localStorage.setItem(milesKey(), JSON.stringify(m));
+    } catch (e) { /* skip */ }
+  }
+}
+
 function loadData() {
+  migrateStoredCategories();
+
   // Budgets
   const savedBudgets = localStorage.getItem(budgetKey());
   if (savedBudgets) budgets = JSON.parse(savedBudgets);
