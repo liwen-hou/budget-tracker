@@ -33,6 +33,11 @@
   .month-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
   .month-nav { display: flex; align-items: center; gap: 12px; }
   .month-label { font-size: 20px; font-weight: 700; color: var(--text); min-width: 160px; text-align: center; }
+  /* Month picker — looks like a heading, but click → native month/year picker */
+  .month-picker { font-size: 20px; font-weight: 700; color: var(--text); background: transparent; border: 1px solid transparent; padding: 4px 8px; border-radius: 6px; min-width: 160px; text-align: center; cursor: pointer; font-family: inherit; color-scheme: dark; }
+  .month-picker:hover, .month-picker:focus { border-color: var(--border); background: var(--surface); outline: none; }
+  /* Hide top action buttons when on the Budgets/Settings page */
+  .main[data-active="settings"] #topActions { display: none; }
   .btn-icon { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); width: 32px; height: 32px; border-radius: var(--radius-sm); cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
   .btn-icon:hover { color: var(--text); border-color: var(--accent); }
   .btn { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: opacity 0.15s; }
@@ -313,12 +318,11 @@
   <div class="month-bar">
     <div class="month-nav">
       <button class="btn-icon" onclick="changeMonth(-1)">‹</button>
-      <div class="month-label" id="monthLabel">—</div>
+      <input type="month" class="month-picker" id="monthPicker" onchange="onMonthPickerChange()">
       <button class="btn-icon" onclick="changeMonth(1)">›</button>
     </div>
-    <div class="btn-group">
+    <div class="btn-group" id="topActions">
       <button class="btn btn-outline" onclick="openScanReceipt()">📸 Scan</button>
-      <button class="btn btn-outline" onclick="enrichTransactionsWithAI()" title="Ask Claude to fill in missing MCCs and verify categories on this month's transactions">✨ Enrich</button>
       <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
     </div>
     <input type="file" id="ocrFileInput" accept="image/*" multiple style="display:none;" onchange="handleScannedReceipt(event)">
@@ -341,7 +345,7 @@
 
   <!-- TRANSACTIONS PAGE -->
   <div id="page-transactions" class="page">
-    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
+    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap;">
       <input id="txnSearch" type="text" placeholder="Search transactions…" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;outline:none;width:240px;" oninput="renderTransactions()">
       <select id="txnFilter" onchange="renderTransactions()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
         <option value="">All categories</option>
@@ -354,6 +358,7 @@
         <option value="UOB KrisFlyer">UOB KrisFlyer</option>
         <option value="Cash">Cash</option>
       </select>
+      <button class="btn btn-outline" style="margin-left:auto;" onclick="enrichTransactionsWithAI()" title="Ask Claude to fill in missing MCCs and verify categories on this month's transactions">✨ Enrich with AI</button>
     </div>
     <div class="txn-list">
       <div class="txn-header">
@@ -1494,10 +1499,27 @@ function initMonth() {
   currentMonth = now.getMonth();
 }
 
+function syncMonthPicker() {
+  const el = document.getElementById('monthPicker');
+  if (el) el.value = `${currentYear}-${String(currentMonth+1).padStart(2,'0')}`;
+}
+
 function changeMonth(delta) {
   currentMonth += delta;
   if (currentMonth > 11) { currentMonth = 0; currentYear++; }
   if (currentMonth < 0)  { currentMonth = 11; currentYear--; }
+  syncMonthPicker();
+  loadData();
+  renderAll();
+}
+
+function onMonthPickerChange() {
+  const v = document.getElementById('monthPicker').value;
+  if (!v) return;
+  const [y, m] = v.split('-').map(Number);
+  if (!y || !m) return;
+  currentYear = y;
+  currentMonth = m - 1;
   loadData();
   renderAll();
 }
@@ -1512,6 +1534,8 @@ function showPage(name, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById(`page-${name}`).classList.add('active');
   if (el) el.classList.add('active');
+  // Tag main so CSS can hide top actions on Settings
+  document.querySelector('.main')?.setAttribute('data-active', name);
   if (name === 'settings') { renderSettings(); renderMilesSettings(); renderRecurringList(); renderSyncPanel(); renderOcrPanel(); }
   if (name === 'transactions') renderTransactions();
   if (name === 'dashboard') renderDashboard();
@@ -1543,7 +1567,7 @@ function deltaBadge(curr, prev) {
 }
 
 function renderDashboard() {
-  document.getElementById('monthLabel').textContent = monthLabel();
+  syncMonthPicker();
   const txns = currentTxns();
   const totalSpent = txns.reduce((s, t) => s + t.amount, 0);
   const totalBudget = Object.values(budgets).reduce((s, v) => s + v, 0);
@@ -2100,7 +2124,7 @@ function toast(msg) {
 function closeModalOutside(e, id) { if (e.target.classList.contains('overlay')) document.getElementById(id).style.display = 'none'; }
 
 function renderAll() {
-  document.getElementById('monthLabel').textContent = monthLabel();
+  syncMonthPicker();
   const activePage = document.querySelector('.page.active')?.id?.replace('page-','');
   if (activePage === 'dashboard') renderDashboard();
   if (activePage === 'transactions') renderTransactions();
@@ -2119,6 +2143,8 @@ document.addEventListener('keydown', e => {
 // ─── Init ────────────────────────────────────────────────────────────────────
 initMonth();
 loadData();
+document.querySelector('.main')?.setAttribute('data-active', 'dashboard');
+syncMonthPicker();
 renderDashboard();
 
 // Background pull on startup (non-blocking; UI is already up)
