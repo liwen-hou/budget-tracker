@@ -927,6 +927,16 @@ function installStorageOverride() {
   };
 }
 
+// Block until every encrypt+persist promise the override scheduled has landed
+// in real localStorage. Call before any reload, navigation, or "we're safe to
+// refresh now" checkpoint — otherwise iOS Safari can tear down the page while
+// the async writes are still pending and lose data.
+async function flushPendingWrites() {
+  while (pendingWrites.size > 0) {
+    await Promise.all([...pendingWrites.values()]);
+  }
+}
+
 async function decryptAllToCache() {
   plaintextCache = {};
   // Snapshot keys first — we'll be re-writing during migration.
@@ -1500,15 +1510,26 @@ async function connectSyncFromUI() {
   if (status) status.textContent = existingGistId ? 'Pulling from existing gist…' : 'Creating gist…';
   try {
     if (existingGistId) {
-      // Reconnect to an existing gist: save credentials, force-pull (epoch lastSyncedAt),
-      // then reload so the UI renders the freshly-decrypted data.
+      // Reconnect to an existing gist: save credentials, force-pull (epoch lastSyncedAt).
       saveSyncConfig({ pat, gistId: existingGistId, lastSyncedAt: '1970-01-01T00:00:00.000Z' });
       const r = await syncPull();
       if (!r.pulled) throw new Error('Connected, but nothing pulled — gist may be empty');
-      toast(`Pulled from gist ${existingGistId.slice(0, 7)} — reloading`);
-      setTimeout(() => location.reload(), 700);
+      // Wait for all encrypted writes to actually land in localStorage before
+      // declaring success — otherwise a refresh right after would lose data.
+      await flushPendingWrites();
+      // Re-hydrate in-memory state from the freshly pulled data.
+      const k = storageKey(currentYear, currentMonth);
+      try { transactions[k] = JSON.parse(localStorage.getItem(k) || '[]'); } catch (e) { transactions[k] = []; }
+      const savedBudgets = localStorage.getItem(budgetKey());
+      if (savedBudgets) budgets = JSON.parse(savedBudgets);
+      const savedMiles = localStorage.getItem(milesKey());
+      if (savedMiles) milesConfig = Object.assign({}, milesConfig, JSON.parse(savedMiles));
+      renderAll();
+      renderSyncPanel();
+      toast(`Pulled from gist ${existingGistId.slice(0, 7)} ✓`);
     } else {
       const gistId = await syncConnect(pat);
+      await flushPendingWrites();
       renderSyncPanel();
       toast(`Connected · gist ${gistId.slice(0, 7)}`);
     }
