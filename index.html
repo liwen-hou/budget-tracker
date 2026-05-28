@@ -823,9 +823,10 @@ function monthKeyOf(y, m) { return `${y}_${String(m+1).padStart(2,'0')}`; }
 // AES-GCM with a key derived (PBKDF2/SHA-256, 250k iters) from a user passphrase.
 // All transaction + config + credential keys are stored encrypted in localStorage,
 // and the gist sync payload is encrypted before it leaves the device.
-const ENC_META_KEY     = 'enc_meta_liwen';
-const ENC_SESSION_KEY  = 'enc_session_key_liwen';
-const PRIVACY_PREF_KEY = 'privacy_pref_liwen';
+const ENC_META_KEY        = 'enc_meta_liwen';
+const ENC_SESSION_KEY     = 'enc_session_key_liwen';
+const ENC_SESSION_PASS_KEY = 'enc_session_pass_liwen';
+const PRIVACY_PREF_KEY    = 'privacy_pref_liwen';
 const ENC_VERIFIER_PT  = 'budget-tracker:ok:v1';
 const ENC_PREFIX       = 'enc:v1:';
 const KDF_ITERATIONS   = 250000;
@@ -836,6 +837,8 @@ const origSetItem    = Storage.prototype.setItem;
 const origRemoveItem = Storage.prototype.removeItem;
 
 let masterKey = null;             // CryptoKey (AES-GCM)
+let currentPassphrase = null;     // kept in memory after unlock; needed to re-derive
+                                  // the key when a remote gist uses a different salt
 let plaintextCache = {};          // key → parsed JSON (or raw string)
 let cacheLoaded = false;
 const pendingWrites = new Map();  // key → Promise (in-flight encrypt+persist)
@@ -968,17 +971,25 @@ async function decryptAllToCache() {
   cacheLoaded = true;
 }
 
-async function stashSessionKey(key) {
+async function stashSessionKey(key, passphrase) {
   const raw = await crypto.subtle.exportKey('raw', key);
   sessionStorage.setItem(ENC_SESSION_KEY, b64Enc(new Uint8Array(raw)));
+  if (passphrase != null) {
+    sessionStorage.setItem(ENC_SESSION_PASS_KEY, btoa(unescape(encodeURIComponent(passphrase))));
+  }
 }
 async function restoreSessionKey() {
   const raw = sessionStorage.getItem(ENC_SESSION_KEY);
-  if (!raw) return null;
+  const rawPass = sessionStorage.getItem(ENC_SESSION_PASS_KEY);
+  // Require both — if the session lacks the passphrase, force re-unlock so
+  // we can handle cross-device salt mismatches via re-derivation.
+  if (!raw || !rawPass) return null;
   try {
-    return await crypto.subtle.importKey(
+    const key = await crypto.subtle.importKey(
       'raw', b64Dec(raw), 'AES-GCM', true, ['encrypt', 'decrypt']
     );
+    try { currentPassphrase = decodeURIComponent(escape(atob(rawPass))); } catch (e) {}
+    return key;
   } catch (e) { return null; }
 }
 
@@ -986,9 +997,10 @@ async function setupPassphrase(passphrase) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const key = await deriveMasterKey(passphrase, salt);
   masterKey = key;
+  currentPassphrase = passphrase;
   const verifier = await encryptString(ENC_VERIFIER_PT, key);
   saveEncMeta({ version: 1, salt: b64Enc(salt), verifier, kdf: 'PBKDF2-SHA256', iter: KDF_ITERATIONS });
-  await stashSessionKey(key);
+  await stashSessionKey(key, passphrase);
 }
 
 async function unlockWithPassphrase(passphrase) {
@@ -1001,7 +1013,25 @@ async function unlockWithPassphrase(passphrase) {
   catch (e) { throw new Error('Wrong passphrase'); }
   if (pt !== ENC_VERIFIER_PT) throw new Error('Wrong passphrase');
   masterKey = key;
-  await stashSessionKey(key);
+  currentPassphrase = passphrase;
+  await stashSessionKey(key, passphrase);
+}
+
+// Re-encrypt local state under a key derived from the REMOTE salt. Called when
+// a v2 gist payload was encrypted by another device whose salt differs from
+// ours. After this, both devices are aligned on the same salt+key.
+async function adoptRemoteEncryption(saltBytes, key) {
+  await flushPendingWrites();              // any in-flight writes still use the old key
+  masterKey = key;
+  const verifier = await encryptString(ENC_VERIFIER_PT, key);
+  saveEncMeta({ version: 1, salt: b64Enc(saltBytes), verifier, kdf: 'PBKDF2-SHA256', iter: KDF_ITERATIONS });
+  if (currentPassphrase) await stashSessionKey(key, currentPassphrase);
+  // Re-encrypt every cached entry so post-reload decrypts succeed.
+  for (const k of Object.keys(plaintextCache)) {
+    const v = plaintextCache[k];
+    const env = await encryptString(typeof v === 'string' ? v : JSON.stringify(v), key);
+    origSetItem.call(localStorage, k, env);
+  }
 }
 
 function showLockOverlay({ setup }) {
@@ -1368,16 +1398,48 @@ async function gatherSyncPayload() {
     }
   }
   // S5: encrypt the data block client-side so the gist holds ciphertext only.
+  // Include our salt so another device with the same passphrase can re-derive
+  // the same key (salt isn't secret — it just prevents pre-computation attacks).
   const ciphertext = await encryptString(JSON.stringify(data));
-  return { version: 2, encrypted: true, lastModified: new Date().toISOString(), ciphertext };
+  const meta = loadEncMeta();
+  return {
+    version: 2,
+    encrypted: true,
+    salt: meta?.salt || null,
+    lastModified: new Date().toISOString(),
+    ciphertext,
+  };
 }
 
 async function applySyncPayload(env) {
   if (!env) return;
   let data;
   if (env.version === 2 && env.encrypted && env.ciphertext) {
-    try { data = JSON.parse(await decryptString(env.ciphertext)); }
-    catch (e) { throw new Error('Could not decrypt remote payload — different passphrase?'); }
+    const localMeta = loadEncMeta();
+    const sameSalt = env.salt && localMeta?.salt === env.salt;
+    if (sameSalt) {
+      try { data = JSON.parse(await decryptString(env.ciphertext)); }
+      catch (e) { throw new Error('Could not decrypt remote payload — different passphrase?'); }
+    } else if (env.salt && currentPassphrase) {
+      // Cross-device: remote was encrypted under a different salt. Re-derive
+      // the key with our passphrase + remote salt; if it decrypts, adopt that
+      // salt locally so future writes stay consistent.
+      const remoteSaltBytes = b64Dec(env.salt);
+      const remoteKey = await deriveMasterKey(currentPassphrase, remoteSaltBytes);
+      let ptStr;
+      try { ptStr = await decryptString(env.ciphertext, remoteKey); }
+      catch (e) { throw new Error('Could not decrypt remote payload — different passphrase?'); }
+      data = JSON.parse(ptStr);
+      await adoptRemoteEncryption(remoteSaltBytes, remoteKey);
+    } else if (!env.salt) {
+      // Legacy v2 envelope without salt info — best-effort with current key.
+      // Only the device that pushed will be able to read this; others must wait
+      // for that device to re-push with the new (salt-bearing) format.
+      try { data = JSON.parse(await decryptString(env.ciphertext)); }
+      catch (e) { throw new Error("Could not decrypt — re-push from the device that has your data so the gist gets salt info."); }
+    } else {
+      throw new Error('Could not decrypt remote payload — different passphrase?');
+    }
   } else if (env.data) {
     data = env.data; // legacy v1 plaintext — accept and let next push re-encrypt
   } else {
