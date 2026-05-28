@@ -316,7 +316,7 @@
       <button class="btn btn-outline" onclick="openImport()">📥 Import</button>
       <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
     </div>
-    <input type="file" id="ocrFileInput" accept="image/*" style="display:none;" onchange="handleScannedReceipt(event)">
+    <input type="file" id="ocrFileInput" accept="image/*" multiple style="display:none;" onchange="handleScannedReceipt(event)">
   </div>
 
   <!-- DASHBOARD PAGE -->
@@ -714,24 +714,33 @@ function fileToBase64(file) {
 }
 
 async function handleScannedReceipt(evt) {
-  const file = evt.target.files?.[0];
-  evt.target.value = '';  // allow re-selecting the same file
-  if (!file) return;
+  const files = Array.from(evt.target.files || []);
+  evt.target.value = '';  // allow re-selecting the same files
+  if (files.length === 0) return;
 
   const cfg = loadOcrConfig();
   if (!cfg.apiKey) { toast('No API key set'); return; }
 
-  toast('Reading receipt…');
-  let base64;
-  try { base64 = await fileToBase64(file); }
-  catch (e) { toast('Could not read file'); return; }
+  toast(`Reading ${files.length} image${files.length === 1 ? '' : 's'}…`);
+
+  let imageBlocks;
+  try {
+    imageBlocks = await Promise.all(files.map(async f => ({
+      type: 'image',
+      source: { type: 'base64', media_type: f.type || 'image/jpeg', data: await fileToBase64(f) },
+    })));
+  } catch (e) {
+    toast('Could not read one of the files');
+    return;
+  }
 
   const today = new Date().toISOString().split('T')[0];
   const catList = CATEGORIES.map(c => c.name).join(', ');
   const cardList = CARDS.join(', ');
-  const prompt = `Extract every transaction visible in this receipt or bank statement image.
+  const multi = files.length > 1;
+  const prompt = `Extract every transaction visible ${multi ? `across all ${files.length} attached receipt or statement images` : 'in this receipt or bank statement image'}.
 
-For each transaction return:
+${multi ? 'Merge transactions from every image into a single combined JSON array. ' : ''}For each transaction return:
 - date: YYYY-MM-DD (if year not visible, use ${today.slice(0,4)}; if no date at all, use ${today})
 - merchant: short description
 - category: choose the closest match from this list — ${catList}
@@ -753,13 +762,10 @@ Return ONLY a JSON array, no prose, no markdown fences. Example:
       },
       body: JSON.stringify({
         model: OCR_MODEL,
-        max_tokens: 2048,
+        max_tokens: 4096,
         messages: [{
           role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: file.type || 'image/jpeg', data: base64 } },
-            { type: 'text', text: prompt },
-          ],
+          content: [...imageBlocks, { type: 'text', text: prompt }],
         }],
       }),
     });
@@ -777,13 +783,11 @@ Return ONLY a JSON array, no prose, no markdown fences. Example:
 
   const body = await res.json();
   const text = (body?.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim();
-  // Strip any code fences just in case
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
 
-  // Drop extracted JSON into the Import modal for review (reuses existing validation flow)
   openImport();
   document.getElementById('importJson').value = cleaned;
-  toast('Extracted — review then click Validate / Import All');
+  toast(`Extracted from ${files.length} image${files.length === 1 ? '' : 's'} — review then Validate / Import All`);
 }
 
 // ─── Cross-Device Sync (GitHub Gist) ─────────────────────────────────────────
