@@ -1,0 +1,17 @@
+# Financial data — never commit these
+*.xlsx
+*.xls
+*.pdf
+*.csv
+
+# JSON backups exported from the tracker
+budget-backup-*.json
+
+# macOS junk
+.DS_Store
+.~lock.*
+*.tmp
+
+# Editor files
+.vscode/
+*.swp

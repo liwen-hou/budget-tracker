@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Liwen — Budget Tracker</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #222536; --surface3: #2a2e42;
+    --border: #2e3248; --accent: #4f8ef7; --accent2: #7c5cbf;
+    --green: #34c97b; --red: #f05252; --orange: #f59e0b; --yellow: #fbbf24;
+    --text: #e8eaf0; --muted: #7b809a; --small: #555a75;
+    --radius: 10px; --radius-sm: 6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
+
+  /* Layout */
+  .app { display: flex; min-height: 100vh; }
+  .sidebar { width: 200px; background: var(--surface); border-right: 1px solid var(--border); padding: 20px 0; flex-shrink: 0; position: fixed; top: 0; bottom: 0; left: 0; overflow-y: auto; }
+  .main { margin-left: 200px; flex: 1; padding: 24px; max-width: 1100px; }
+
+  /* Sidebar */
+  .logo { padding: 0 20px 20px; border-bottom: 1px solid var(--border); }
+  .logo h2 { font-size: 15px; font-weight: 700; color: var(--text); }
+  .logo p { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 20px; cursor: pointer; color: var(--muted); font-size: 13px; transition: all 0.15s; border-left: 3px solid transparent; }
+  .nav-item:hover { color: var(--text); background: var(--surface2); }
+  .nav-item.active { color: var(--accent); background: rgba(79,142,247,0.08); border-left-color: var(--accent); }
+  .nav-section { font-size: 10px; font-weight: 600; color: var(--small); letter-spacing: 0.08em; text-transform: uppercase; padding: 16px 20px 6px; }
+
+  /* Month selector */
+  .month-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .month-nav { display: flex; align-items: center; gap: 12px; }
+  .month-label { font-size: 20px; font-weight: 700; color: var(--text); min-width: 160px; text-align: center; }
+  .btn-icon { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); width: 32px; height: 32px; border-radius: var(--radius-sm); cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .btn-icon:hover { color: var(--text); border-color: var(--accent); }
+  .btn { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: opacity 0.15s; }
+  .btn:hover { opacity: 0.85; }
+  .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn-outline:hover { color: var(--text); border-color: var(--text); opacity: 1; }
+  .btn-danger { background: var(--red); }
+  .btn-group { display: flex; gap: 8px; }
+
+  /* Cards */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .card-sm { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+
+  /* Summary row */
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .stat-value { font-size: 22px; font-weight: 700; }
+  .stat-value.green { color: var(--green); }
+  .stat-value.red { color: var(--red); }
+  .stat-value.orange { color: var(--orange); }
+  .stat-sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+  /* Miles tracker */
+  .miles-section { margin-bottom: 24px; }
+  .miles-section-title { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+  .miles-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .miles-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .miles-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .miles-card-name { font-size: 14px; font-weight: 700; }
+  .miles-badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; }
+  .miles-badge.hit { background: rgba(52,201,123,0.2); color: var(--green); }
+  .miles-badge.miss { background: rgba(240,82,82,0.2); color: var(--red); }
+  .miles-badge.close { background: rgba(245,158,11,0.2); color: var(--orange); }
+  .miles-amounts { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+  .miles-amounts .spent-val { font-size: 18px; font-weight: 700; color: var(--text); }
+  .miles-threshold { font-size: 12px; }
+  .miles-progress-track { background: var(--surface3); border-radius: 99px; height: 8px; overflow: hidden; }
+  .miles-progress-bar { height: 100%; border-radius: 99px; transition: width 0.4s ease; }
+  .miles-progress-bar.green { background: var(--green); }
+  .miles-progress-bar.orange { background: var(--orange); }
+  .miles-progress-bar.red { background: var(--red); }
+  .miles-footer { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--muted); }
+  .miles-card-note { font-size: 11px; color: var(--small); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+
+  /* Budget bars */
+  .budget-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px; }
+  .budget-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .budget-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .budget-cat { font-size: 13px; font-weight: 600; }
+  .budget-emoji { font-size: 16px; margin-right: 6px; }
+  .budget-amounts { font-size: 12px; color: var(--muted); text-align: right; }
+  .budget-amounts strong { color: var(--text); font-size: 14px; display: block; }
+  .budget-tag { font-size: 10px; padding: 2px 6px; border-radius: 20px; font-weight: 600; }
+  .tag-fixed { background: rgba(124,92,191,0.2); color: var(--accent2); }
+  .tag-ok { background: rgba(52,201,123,0.15); color: var(--green); }
+  .tag-warn { background: rgba(245,158,11,0.15); color: var(--orange); }
+  .tag-over { background: rgba(240,82,82,0.15); color: var(--red); }
+  .progress-track { background: var(--surface3); border-radius: 99px; height: 6px; overflow: hidden; }
+  .progress-bar { height: 100%; border-radius: 99px; transition: width 0.4s ease; }
+  .progress-bar.green { background: var(--green); }
+  .progress-bar.orange { background: var(--orange); }
+  .progress-bar.red { background: var(--red); }
+  .budget-footer { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--muted); }
+
+  /* Transactions */
+  .txn-list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .txn-header { display: grid; grid-template-columns: 90px 1fr 140px 100px 90px 36px; gap: 12px; padding: 10px 16px; background: var(--surface2); border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .txn-row { display: grid; grid-template-columns: 90px 1fr 140px 100px 90px 36px; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--border); align-items: center; transition: background 0.1s; }
+  .txn-row:last-child { border-bottom: none; }
+  .txn-row:hover { background: var(--surface2); }
+  .txn-date { font-size: 12px; color: var(--muted); }
+  .txn-merchant { font-size: 13px; font-weight: 500; }
+  .txn-cat-badge { font-size: 11px; padding: 3px 8px; border-radius: 20px; background: var(--surface3); color: var(--muted); display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .txn-card-badge { font-size: 11px; padding: 2px 7px; border-radius: 20px; font-weight: 600; }
+  .card-dbs { background: rgba(79,142,247,0.15); color: #7ab3f9; }
+  .card-uob-lady { background: rgba(52,201,123,0.15); color: #34c97b; }
+  .card-uob-kf { background: rgba(124,92,191,0.15); color: #9b7de8; }
+  .card-hsbc { background: rgba(240,82,82,0.15); color: #f87171; }
+  .card-cash { background: rgba(245,158,11,0.15); color: var(--orange); }
+  .txn-amount { font-size: 13px; font-weight: 600; text-align: right; }
+  .btn-del { background: none; border: none; color: var(--small); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 4px; }
+  .btn-del:hover { color: var(--red); background: rgba(240,82,82,0.1); }
+
+  /* Modal */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; display: flex; align-items: center; justify-content: center; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px; width: 440px; max-width: 95vw; }
+  .modal-wide { width: 600px; }
+  .modal h3 { font-size: 17px; font-weight: 700; margin-bottom: 20px; }
+  .form-row { margin-bottom: 14px; }
+  .form-row label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .form-row input, .form-row select, .form-row textarea { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 9px 12px; border-radius: var(--radius-sm); font-size: 14px; outline: none; }
+  .form-row textarea { resize: vertical; min-height: 140px; font-family: 'SF Mono', monospace; font-size: 12px; line-height: 1.5; }
+  .form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--accent); }
+  .form-row select option { background: var(--surface2); }
+  .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+  .import-hint { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px; font-size: 11px; color: var(--muted); font-family: 'SF Mono', monospace; line-height: 1.6; }
+  .import-hint .hint-label { font-size: 11px; color: var(--small); text-transform: uppercase; letter-spacing: 0.06em; font-family: -apple-system, sans-serif; margin-bottom: 6px; font-weight: 600; }
+  .import-result { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; display: none; }
+  .import-result.ok { background: rgba(52,201,123,0.1); border: 1px solid rgba(52,201,123,0.3); color: var(--green); }
+  .import-result.err { background: rgba(240,82,82,0.1); border: 1px solid rgba(240,82,82,0.3); color: var(--red); }
+
+  /* Settings budget table */
+  .settings-table { width: 100%; border-collapse: collapse; }
+  .settings-table th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .settings-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .settings-table tr:last-child td { border-bottom: none; }
+  .settings-table input { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; border-radius: 4px; font-size: 13px; width: 100px; text-align: right; }
+  .settings-table input:focus { outline: none; border-color: var(--accent); }
+  .fixed-badge { font-size: 10px; color: var(--accent2); background: rgba(124,92,191,0.15); padding: 2px 6px; border-radius: 99px; }
+
+  /* Card breakdown */
+  .card-breakdown { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+  .card-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+  .card-name { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .card-total { font-size: 18px; font-weight: 700; }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 48px; color: var(--muted); }
+  .empty p { margin-top: 8px; font-size: 13px; }
+
+  /* Page visibility */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 99px; }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 12px 18px; border-radius: var(--radius-sm); font-size: 13px; z-index: 999; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+
+  /* Section header */
+  .section-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; margin-top: 4px; }
+
+  /* ─── Mobile ─────────────────────────────────────────────────────────────── */
+  @media (max-width: 700px) {
+
+    /* Sidebar → fixed bottom tab bar */
+    .sidebar {
+      width: 100%; height: 58px;
+      top: auto; bottom: 0; left: 0; right: 0;
+      border-right: none; border-top: 1px solid var(--border);
+      padding: 0; display: flex; flex-direction: row;
+      overflow: hidden; z-index: 50;
+    }
+    .logo, .nav-section { display: none; }
+    .nav-item {
+      flex: 1; flex-direction: column; justify-content: center; align-items: center;
+      padding: 6px 4px; font-size: 10px; border-left: none; border-top: 2px solid transparent; gap: 2px;
+    }
+    .nav-item.active { border-left-color: transparent; border-top-color: var(--accent); }
+
+    /* Main — full width, pad bottom for tab bar */
+    .main { margin-left: 0; padding: 14px 14px 72px; max-width: 100%; }
+
+    /* Month bar — stack vertically */
+    .month-bar { flex-direction: column; gap: 10px; align-items: stretch; }
+    .month-nav { justify-content: center; }
+    .month-label { font-size: 18px; }
+    .btn-group { display: grid; grid-template-columns: 1fr 1fr; }
+    .btn-group .btn { justify-content: center; }
+
+    /* Summary stats — 2×2 */
+    .summary-grid { grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+    .stat-value { font-size: 18px; }
+
+    /* Card breakdown — 3 per row (UOB splits into 2, still fits) */
+    .card-breakdown { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+    .card-total { font-size: 14px; }
+    .card-name { font-size: 10px; }
+
+    /* Miles grid — single column */
+    .miles-grid { grid-template-columns: 1fr; gap: 10px; }
+
+    /* Budget grid — single column */
+    .budget-grid { grid-template-columns: 1fr; gap: 10px; }
+
+    /* Transaction filters — wrap */
+    #page-transactions > div:first-child { flex-wrap: wrap; }
+    #txnSearch { width: 100% !important; flex: 1 1 100%; }
+
+    /* Transaction rows — 2-row card layout */
+    .txn-header { display: none; }
+    .txn-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      grid-template-rows: auto auto;
+      grid-template-areas:
+        "merchant amount del"
+        "date     cat    card";
+      gap: 5px 8px;
+      padding: 12px 14px;
+    }
+    .txn-row > span:nth-child(1) { grid-area: date; font-size: 11px; align-self: center; }
+    .txn-row > span:nth-child(2) { grid-area: merchant; font-size: 14px; align-self: center; }
+    .txn-row > span:nth-child(3) { grid-area: cat; align-self: center; }
+    .txn-row > span:nth-child(4) { grid-area: card; align-self: center; }
+    .txn-row > span:nth-child(5) { grid-area: amount; font-size: 14px; font-weight: 700; align-self: center; white-space: nowrap; }
+    .txn-row > button.btn-del   { grid-area: del; align-self: center; justify-self: end; }
+
+    /* Modals — bottom sheet */
+    .overlay { align-items: flex-end; }
+    .modal, .modal-wide {
+      width: 100%; max-width: 100%; border-radius: 18px 18px 0 0;
+      max-height: 88vh; overflow-y: auto; padding: 22px 18px 36px;
+    }
+    .modal-actions { flex-wrap: wrap; }
+    .modal-actions .btn, .modal-actions .btn-outline { flex: 1; justify-content: center; min-width: 80px; }
+
+    /* Form grid — single column on mobile */
+    .form-grid-2 { grid-template-columns: 1fr; }
+
+    /* Settings table — hide verbose description column */
+    .settings-table td:nth-child(2),
+    .settings-table th:nth-child(2) { display: none; }
+    .settings-table input { width: 80px; font-size: 13px; }
+
+    /* Miles settings category inputs — single column */
+    #page-settings .card div[style*="grid-template-columns:1fr 1fr"] { display: flex !important; flex-direction: column !important; }
+
+    /* Card */
+    .card { padding: 16px 14px; }
+    .card-sm { padding: 12px 14px; }
+
+    /* Toast — above tab bar */
+    .toast { bottom: 68px; right: 12px; left: 12px; text-align: center; }
+
+    /* Import hint smaller */
+    .import-hint { font-size: 10px; padding: 10px; }
+
+    /* Empty state smaller */
+    .empty { padding: 32px 16px; }
+  }
+
+  /* Tiny screens (≤380px) */
+  @media (max-width: 380px) {
+    .summary-grid { grid-template-columns: 1fr; }
+    .card-breakdown { grid-template-columns: 1fr 1fr; }
+    .stat-value { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- Sidebar -->
+<div class="sidebar">
+  <div class="logo">
+    <h2>💰 Budget Tracker</h2>
+    <p>Liwen · Personal Finance</p>
+  </div>
+  <div class="nav-section">Overview</div>
+  <div class="nav-item active" onclick="showPage('dashboard', this)"><span style="font-size:18px;line-height:1">📊</span><span>Dashboard</span></div>
+  <div class="nav-item" onclick="showPage('transactions', this)"><span style="font-size:18px;line-height:1">📋</span><span>Transactions</span></div>
+  <div class="nav-section">Manage</div>
+  <div class="nav-item" onclick="showPage('settings', this)"><span style="font-size:18px;line-height:1">⚙️</span><span>Budgets</span></div>
+</div>
+
+<!-- Main -->
+<div class="main">
+
+  <!-- Month bar (always visible) -->
+  <div class="month-bar">
+    <div class="month-nav">
+      <button class="btn-icon" onclick="changeMonth(-1)">‹</button>
+      <div class="month-label" id="monthLabel">—</div>
+      <button class="btn-icon" onclick="changeMonth(1)">›</button>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-outline" onclick="openImport()">📥 Import</button>
+      <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
+    </div>
+  </div>
+
+  <!-- DASHBOARD PAGE -->
+  <div id="page-dashboard" class="page active">
+    <div class="summary-grid" id="summaryGrid"></div>
+    <div class="card-breakdown" id="cardBreakdown"></div>
+
+    <!-- Miles Tracker -->
+    <div class="miles-section">
+      <div class="section-title">✈️ Miles Promo Tracker</div>
+      <div class="miles-grid" id="milesGrid"></div>
+    </div>
+
+    <div class="section-title">📂 Budget by Category</div>
+    <div class="budget-grid" id="budgetGrid"></div>
+  </div>
+
+  <!-- TRANSACTIONS PAGE -->
+  <div id="page-transactions" class="page">
+    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
+      <input id="txnSearch" type="text" placeholder="Search transactions…" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;outline:none;width:240px;" oninput="renderTransactions()">
+      <select id="txnFilter" onchange="renderTransactions()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
+        <option value="">All categories</option>
+      </select>
+      <select id="txnCardFilter" onchange="renderTransactions()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
+        <option value="">All cards</option>
+        <option value="DBS Vantage">DBS Vantage</option>
+        <option value="HSBC Revolution">HSBC Revolution</option>
+        <option value="UOB Lady's">UOB Lady's</option>
+        <option value="UOB KrisFlyer">UOB KrisFlyer</option>
+        <option value="Cash">Cash</option>
+      </select>
+    </div>
+    <div class="txn-list">
+      <div class="txn-header">
+        <span>Date</span><span>Merchant</span><span>Category</span><span>Card</span><span style="text-align:right">Amount</span><span></span>
+      </div>
+      <div id="txnListBody"></div>
+    </div>
+  </div>
+
+  <!-- SETTINGS PAGE -->
+  <div id="page-settings" class="page">
+
+    <!-- Miles Settings -->
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <div style="font-size:16px;font-weight:700;">✈️ Miles Tracker Settings</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">Thresholds and category mappings for all 4 cards.</div>
+        </div>
+        <button class="btn" onclick="saveMilesSettings()">Save</button>
+      </div>
+      <table class="settings-table">
+        <tr><th>Tracker</th><th>Rule</th><th style="text-align:right">Threshold (SGD)</th></tr>
+        <tr>
+          <td><span class="txn-card-badge card-hsbc">HSBC Revolution</span><div style="font-size:11px;color:var(--small);margin-top:3px;">Monthly cap</div></td>
+          <td style="font-size:12px;color:var(--muted);">4 mpd on qualifying contactless + online spend (dining, shopping, transport, subscriptions). Permanent from Apr 2026.</td>
+          <td style="text-align:right"><input type="number" id="miles_hsbc" value="1000" min="0" step="50"></td>
+        </tr>
+        <tr>
+          <td><span class="txn-card-badge card-uob-lady">UOB Lady's · Fashion</span><div style="font-size:11px;color:var(--small);margin-top:3px;">Monthly cap per category</div></td>
+          <td style="font-size:12px;color:var(--muted);">4 mpd on Fashion bonus category. Tracks UOB Lady's card spend in the categories listed below.</td>
+          <td style="text-align:right"><input type="number" id="miles_uob_fashion" value="750" min="0" step="50"></td>
+        </tr>
+        <tr>
+          <td><span class="txn-card-badge card-uob-lady">UOB Lady's · Dining</span><div style="font-size:11px;color:var(--small);margin-top:3px;">Monthly cap per category</div></td>
+          <td style="font-size:12px;color:var(--muted);">4 mpd on Dining bonus category. Tracks UOB Lady's card spend in the categories listed below.</td>
+          <td style="text-align:right"><input type="number" id="miles_uob_dining" value="750" min="0" step="50"></td>
+        </tr>
+        <tr>
+          <td><span class="txn-card-badge card-uob-kf">UOB KrisFlyer</span><div style="font-size:11px;color:var(--small);margin-top:3px;">Annual SIA Group minimum</div></td>
+          <td style="font-size:12px;color:var(--muted);">Must spend ≥ threshold on SQ/Scoot/KrisShop per card year to unlock 3 mpd + 2.4 mpd bonus rates. Tracks all KrisFlyer card spend Jan–Dec.</td>
+          <td style="text-align:right"><input type="number" id="miles_kf_annual" value="1000" min="0" step="50"></td>
+        </tr>
+      </table>
+
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">Category Mappings for UOB Lady's</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-row" style="margin-bottom:0;">
+            <label>👗 Fashion category maps to</label>
+            <input type="text" id="miles_fashion_cats" value="Luxury Fashion, Clothing &amp; Apparel" placeholder="e.g. Luxury Fashion, Clothing &amp; Apparel">
+          </div>
+          <div class="form-row" style="margin-bottom:0;">
+            <label>🍽️ Dining category maps to</label>
+            <input type="text" id="miles_dining_cats" value="Fine Dining, Casual Dining, Cafes &amp; Coffee" placeholder="e.g. Fine Dining, Casual Dining, Cafes &amp; Coffee">
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--small);margin-top:8px;">Enter budget category names separated by commas. These determine which UOB Lady's transactions count toward each miles cap.</div>
+      </div>
+    </div>
+
+    <!-- Budget Settings -->
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <div style="font-size:16px;font-weight:700;">Monthly Budgets</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">Pre-filled from your expense analysis. Fixed costs are locked.</div>
+        </div>
+        <button class="btn" onclick="saveBudgets()">Save Budgets</button>
+      </div>
+      <table class="settings-table" id="settingsTable"></table>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="card">
+      <div style="font-size:15px;font-weight:700;margin-bottom:12px;">Danger Zone</div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-outline" onclick="exportData()">Export JSON backup</button>
+        <button class="btn btn-outline" onclick="openImport()">📥 Import transactions</button>
+        <button class="btn btn-danger" onclick="clearMonth()">Clear this month's transactions</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- Add Transaction Modal -->
+<div class="overlay" id="addModal" style="display:none;" onclick="closeModalOutside(event, 'addModal')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>Add Transaction</h3>
+    <div class="form-row">
+      <label>Date</label>
+      <input type="date" id="txnDate">
+    </div>
+    <div class="form-row">
+      <label>Merchant / Description</label>
+      <input type="text" id="txnMerchant" placeholder="e.g. Born Restaurant">
+    </div>
+    <div class="form-grid-2">
+      <div class="form-row">
+        <label>Category</label>
+        <select id="txnCategory"></select>
+      </div>
+      <div class="form-row">
+        <label>Card</label>
+        <select id="txnCard">
+          <option value="DBS Vantage">DBS Vantage</option>
+          <option value="HSBC Revolution">HSBC Revolution</option>
+          <option value="UOB Lady's">UOB Lady's</option>
+          <option value="UOB KrisFlyer">UOB KrisFlyer</option>
+          <option value="Cash">Cash</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Amount (SGD)</label>
+      <input type="number" id="txnAmount" placeholder="0.00" step="0.01" min="0">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeAddTxn()">Cancel</button>
+      <button class="btn" onclick="saveTxn()">Add Transaction</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div class="overlay" id="importModal" style="display:none;" onclick="closeModalOutside(event, 'importModal')">
+  <div class="modal modal-wide" onclick="event.stopPropagation()">
+    <h3>📥 Import Transactions</h3>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
+      Paste the JSON Claude sends you after reading your statement screenshot. Each transaction will be added to the current month (<strong id="importMonthLabel"></strong>).
+    </p>
+    <div class="import-hint">
+      <div class="hint-label">Expected format</div>
+[<br>
+&nbsp;&nbsp;{"date":"2026-05-15","merchant":"Born Restaurant","category":"Fine Dining","card":"DBS Vantage","amount":120.50},<br>
+&nbsp;&nbsp;{"date":"2026-05-18","merchant":"Uniqlo","category":"Clothing & Apparel","card":"HSBC Revolution","amount":49.90}<br>
+]
+    </div>
+    <div class="form-row">
+      <label>Paste JSON here</label>
+      <textarea id="importJson" placeholder="[ ... ]" oninput="clearImportResult()"></textarea>
+    </div>
+    <div class="import-result" id="importResult"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeImport()">Cancel</button>
+      <button class="btn btn-outline" onclick="validateImport()">Validate</button>
+      <button class="btn" onclick="processImport()">Import All</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── Data ───────────────────────────────────────────────────────────────────
+const CATEGORIES = [
+  { name: "Fine Dining",          emoji: "🍽️",  budget: 600,  fixed: false },
+  { name: "Casual Dining",        emoji: "🍜",  budget: 400,  fixed: false },
+  { name: "Food Delivery",        emoji: "🥡",  budget: 80,   fixed: false },
+  { name: "Cafes & Coffee",       emoji: "☕",  budget: 100,  fixed: false },
+  { name: "Groceries",            emoji: "🛒",  budget: 300,  fixed: false },
+  { name: "Luxury Fashion",       emoji: "👔",  budget: 300,  fixed: false },
+  { name: "Clothing & Apparel",   emoji: "👕",  budget: 150,  fixed: false },
+  { name: "Shopping & Beauty",    emoji: "💄",  budget: 200,  fixed: false },
+  { name: "Wellness (Pure Yoga)", emoji: "🧘",  budget: 241,  fixed: true  },
+  { name: "Fitness (Ally+Class)", emoji: "🏋️",  budget: 451,  fixed: true  },
+  { name: "Travel",               emoji: "✈️",  budget: 833,  fixed: false },
+  { name: "Entertainment",        emoji: "🎭",  budget: 100,  fixed: false },
+  { name: "Subscriptions",        emoji: "📱",  budget: 80,   fixed: true  },
+  { name: "Telco",                emoji: "📡",  budget: 90,   fixed: true  },
+  { name: "Transport",            emoji: "🚗",  budget: 300,  fixed: false },
+  { name: "Medical & Dental",     emoji: "🏥",  budget: 100,  fixed: false },
+  { name: "Lifestyle Services",   emoji: "🛵",  budget: 100,  fixed: false },
+  { name: "Personal Loan (Reno)", emoji: "🏠",  budget: 969,  fixed: true  },
+  { name: "Instalments (IPP)",    emoji: "💳",  budget: 336,  fixed: true  },
+  { name: "Other",                emoji: "📦",  budget: 200,  fixed: false },
+];
+
+const CARDS = ["DBS Vantage","HSBC Revolution","UOB Lady's","UOB KrisFlyer","Cash"];
+const VALID_CATS = new Set(CATEGORIES.map(c => c.name));
+const VALID_CARDS = new Set(CARDS);
+
+const CARD_CLASS = {
+  "DBS Vantage":    "card-dbs",
+  "HSBC Revolution":"card-hsbc",
+  "UOB Lady's":     "card-uob-lady",
+  "UOB KrisFlyer":  "card-uob-kf",
+  "Cash":           "card-cash",
+};
+
+// State
+let currentYear, currentMonth;
+let budgets = {};
+let transactions = {};
+let milesConfig = {
+  hsbc: 1000,
+  uobLadyFashion: 750,
+  uobLadyDining: 750,
+  kfAnnual: 1000,
+  fashionCats: ['Luxury Fashion', 'Clothing & Apparel'],
+  diningCats: ['Fine Dining', 'Casual Dining', 'Cafes & Coffee'],
+};
+
+function storageKey(y, m) { return `txns_${y}_${String(m+1).padStart(2,'0')}`; }
+function budgetKey() { return `budgets_liwen`; }
+function milesKey() { return `miles_config_liwen`; }
+
+// ─── Load / Save ──────────────────────────────────────────────────────────────
+function loadData() {
+  // Budgets
+  const savedBudgets = localStorage.getItem(budgetKey());
+  if (savedBudgets) budgets = JSON.parse(savedBudgets);
+  else CATEGORIES.forEach(c => { budgets[c.name] = c.budget; });
+
+  // Miles config — merge saved over defaults so new keys always have values
+  const savedMiles = localStorage.getItem(milesKey());
+  if (savedMiles) milesConfig = Object.assign({}, milesConfig, JSON.parse(savedMiles));
+
+  // Transactions for current month
+  const key = storageKey(currentYear, currentMonth);
+  const raw = localStorage.getItem(key);
+  if (raw) transactions[key] = JSON.parse(raw);
+  else transactions[key] = [];
+}
+
+function saveTransactions() {
+  const key = storageKey(currentYear, currentMonth);
+  localStorage.setItem(key, JSON.stringify(transactions[key] || []));
+}
+
+function currentTxns() {
+  return transactions[storageKey(currentYear, currentMonth)] || [];
+}
+
+// ─── Month navigation ────────────────────────────────────────────────────────
+function initMonth() {
+  const now = new Date();
+  currentYear = now.getFullYear();
+  currentMonth = now.getMonth();
+}
+
+function changeMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+  if (currentMonth < 0)  { currentMonth = 11; currentYear--; }
+  loadData();
+  renderAll();
+}
+
+function monthLabel() {
+  return new Date(currentYear, currentMonth, 1).toLocaleString('en-SG', { month: 'long', year: 'numeric' });
+}
+
+// ─── Pages ───────────────────────────────────────────────────────────────────
+function showPage(name, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(`page-${name}`).classList.add('active');
+  if (el) el.classList.add('active');
+  if (name === 'settings') { renderSettings(); renderMilesSettings(); }
+  if (name === 'transactions') renderTransactions();
+  if (name === 'dashboard') renderDashboard();
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+function renderDashboard() {
+  document.getElementById('monthLabel').textContent = monthLabel();
+  const txns = currentTxns();
+  const totalSpent = txns.reduce((s, t) => s + t.amount, 0);
+  const totalBudget = Object.values(budgets).reduce((s, v) => s + v, 0);
+  const remaining = totalBudget - totalSpent;
+  const pct = totalBudget > 0 ? totalSpent / totalBudget : 0;
+
+  const days = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const today = new Date();
+  const dayOfMonth = (today.getFullYear() === currentYear && today.getMonth() === currentMonth)
+    ? today.getDate() : days;
+  const dailyAvg = dayOfMonth > 0 ? totalSpent / dayOfMonth : 0;
+  const projected = dailyAvg * days;
+
+  document.getElementById('summaryGrid').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Spent This Month</div>
+      <div class="stat-value ${pct > 1 ? 'red' : pct > 0.8 ? 'orange' : 'green'}">$${fmt(totalSpent)}</div>
+      <div class="stat-sub">${(pct*100).toFixed(0)}% of $${fmt(totalBudget)} budget</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Remaining Budget</div>
+      <div class="stat-value ${remaining < 0 ? 'red' : 'green'}">$${fmt(Math.abs(remaining))}</div>
+      <div class="stat-sub">${remaining < 0 ? '⚠️ Over budget' : 'left to spend'}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Daily Average</div>
+      <div class="stat-value">$${fmt(dailyAvg)}</div>
+      <div class="stat-sub">Day ${dayOfMonth} of ${days}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Projected Month-End</div>
+      <div class="stat-value ${projected > totalBudget ? 'orange' : 'green'}">$${fmt(projected)}</div>
+      <div class="stat-sub">at current pace</div>
+    </div>
+  `;
+
+  // Card breakdown
+  const cardTotals = {};
+  CARDS.forEach(c => cardTotals[c] = 0);
+  txns.forEach(t => { if (cardTotals[t.card] !== undefined) cardTotals[t.card] += t.amount; });
+  document.getElementById('cardBreakdown').innerHTML = CARDS.map(card => `
+    <div class="card-stat">
+      <div class="card-name"><span class="txn-card-badge ${CARD_CLASS[card]}">${card}</span></div>
+      <div class="card-total" style="margin-top:8px;">$${fmt(cardTotals[card])}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px;">${txns.filter(t=>t.card===card).length} txns</div>
+    </div>
+  `).join('');
+
+  // Miles tracker
+  renderMilesTracker(txns, cardTotals);
+
+  // Budget bars
+  const spentByCategory = {};
+  CATEGORIES.forEach(c => spentByCategory[c.name] = 0);
+  txns.forEach(t => { if (spentByCategory[t.category] !== undefined) spentByCategory[t.category] += t.amount; });
+
+  document.getElementById('budgetGrid').innerHTML = CATEGORIES.map(cat => {
+    const spent = spentByCategory[cat.name] || 0;
+    const bud   = budgets[cat.name] || cat.budget;
+    const pct   = bud > 0 ? Math.min(spent / bud, 1) : 0;
+    const over  = spent > bud;
+    const warn  = spent > bud * 0.8;
+    const barClass = over ? 'red' : warn ? 'orange' : 'green';
+    const tagClass = cat.fixed ? 'tag-fixed' : over ? 'tag-over' : warn ? 'tag-warn' : 'tag-ok';
+    const tagText  = cat.fixed ? 'Fixed' : over ? 'Over' : warn ? 'Near limit' : 'On track';
+    return `
+      <div class="budget-item">
+        <div class="budget-header">
+          <div>
+            <div class="budget-cat"><span class="budget-emoji">${cat.emoji}</span>${cat.name}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            <span class="budget-tag ${tagClass}">${tagText}</span>
+            <div class="budget-amounts"><strong>$${fmt(spent)}</strong>of $${fmt(bud)}</div>
+          </div>
+        </div>
+        <div class="progress-track"><div class="progress-bar ${barClass}" style="width:${(pct*100).toFixed(1)}%"></div></div>
+        <div class="budget-footer">
+          <span>${(pct*100).toFixed(0)}% used</span>
+          <span>${over ? '⚠️ $'+fmt(spent-bud)+' over' : '$'+fmt(bud-spent)+' left'}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ─── Miles Tracker ────────────────────────────────────────────────────────────
+function getKrisFlyerYTD() {
+  const year = new Date().getFullYear();
+  let total = 0;
+  for (let m = 0; m < 12; m++) {
+    const key = `txns_${year}_${String(m+1).padStart(2,'0')}`;
+    const raw = localStorage.getItem(key);
+    if (raw) JSON.parse(raw).forEach(t => { if (t.card === 'UOB KrisFlyer') total += t.amount; });
+  }
+  return total;
+}
+
+function milesPanel({ label, subLabel, badgeClass, spent, threshold, rate, note, isAnnual }) {
+  const pct = threshold > 0 ? Math.min(spent / threshold, 1) : 0;
+  const hit = spent >= threshold;
+  const close = !hit && spent >= threshold * 0.75;
+  const barClass = hit ? 'green' : close ? 'orange' : 'red';
+  const badgeCls = hit ? 'hit' : close ? 'close' : 'miss';
+  const badgeText = hit ? '✅ Cap Hit' : close ? '⚡ Almost' : '❌ Not Yet';
+  const remaining = Math.max(threshold - spent, 0);
+  const periodLabel = isAnnual ? 'this year' : 'this month';
+  return `
+    <div class="miles-card">
+      <div class="miles-card-header">
+        <div>
+          <div class="miles-card-name">
+            <span class="txn-card-badge ${badgeClass}" style="font-size:12px;padding:3px 10px;">${label}</span>
+          </div>
+          ${subLabel ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;">${subLabel}</div>` : ''}
+        </div>
+        <span class="miles-badge ${badgeCls}">${badgeText}</span>
+      </div>
+      <div class="miles-amounts">
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">Spent ${periodLabel}</div>
+          <div class="spent-val" style="color:${hit ? 'var(--green)' : 'var(--text)'}">$${fmt(spent)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">${isAnnual ? 'Annual min' : 'Monthly cap'}</div>
+          <div style="font-size:18px;font-weight:700;color:var(--muted);">$${fmt(threshold)}</div>
+        </div>
+      </div>
+      <div class="miles-progress-track">
+        <div class="miles-progress-bar ${barClass}" style="width:${(pct*100).toFixed(1)}%"></div>
+      </div>
+      <div class="miles-footer">
+        <span>${(pct*100).toFixed(0)}% to ${isAnnual ? 'minimum' : 'cap'}</span>
+        <span>${hit ? (isAnnual ? '🎉 Bonus unlocked!' : '🎉 Cap maxed!') : 'Need $'+fmt(remaining)+' more'}</span>
+      </div>
+      <div class="miles-card-note">${rate} · ${note}</div>
+    </div>
+  `;
+}
+
+function renderMilesTracker(txns, cardTotals) {
+  // HSBC: total HSBC spend this month
+  const hsbcSpent = cardTotals?.['HSBC Revolution'] || 0;
+
+  // UOB Lady's Fashion: UOB Lady's card + fashion-mapped categories
+  const fashionSet = new Set(milesConfig.fashionCats);
+  const uobFashion = txns.filter(t => t.card === "UOB Lady's" && fashionSet.has(t.category))
+                         .reduce((s, t) => s + t.amount, 0);
+
+  // UOB Lady's Dining: UOB Lady's card + dining-mapped categories
+  const diningSet = new Set(milesConfig.diningCats);
+  const uobDining = txns.filter(t => t.card === "UOB Lady's" && diningSet.has(t.category))
+                        .reduce((s, t) => s + t.amount, 0);
+
+  // KrisFlyer: all UOB KrisFlyer spend year-to-date
+  const kfYTD = getKrisFlyerYTD();
+
+  document.getElementById('milesGrid').innerHTML = [
+    milesPanel({
+      label: 'HSBC Revolution',
+      subLabel: 'Monthly cap — dining, shopping, transport, online',
+      badgeClass: 'card-hsbc',
+      spent: hsbcSpent,
+      threshold: milesConfig.hsbc,
+      rate: '4 mpd',
+      note: 'Contactless + online spend. Excludes SimplyGo, fast food delivery, OTAs.',
+      isAnnual: false,
+    }),
+    milesPanel({
+      label: "UOB Lady's · Fashion",
+      subLabel: milesConfig.fashionCats.join(' · '),
+      badgeClass: 'card-uob-lady',
+      spent: uobFashion,
+      threshold: milesConfig.uobLadyFashion,
+      rate: '4 mpd',
+      note: 'Tracks UOB Lady\'s card spend in Fashion-mapped categories.',
+      isAnnual: false,
+    }),
+    milesPanel({
+      label: "UOB Lady's · Dining",
+      subLabel: milesConfig.diningCats.join(' · '),
+      badgeClass: 'card-uob-lady',
+      spent: uobDining,
+      threshold: milesConfig.uobLadyDining,
+      rate: '4 mpd',
+      note: 'Tracks UOB Lady\'s card spend in Dining-mapped categories.',
+      isAnnual: false,
+    }),
+    milesPanel({
+      label: 'UOB KrisFlyer',
+      subLabel: 'Annual SIA Group minimum · Jan–Dec ' + new Date().getFullYear(),
+      badgeClass: 'card-uob-kf',
+      spent: kfYTD,
+      threshold: milesConfig.kfAnnual,
+      rate: '3 mpd on SQ/Scoot',
+      note: 'Tracks all UOB KrisFlyer card spend YTD. Must hit $' + milesConfig.kfAnnual + '/year to unlock 2.4 mpd bonus.',
+      isAnnual: true,
+    }),
+  ].join('');
+}
+
+// ─── Transactions ─────────────────────────────────────────────────────────────
+function renderTransactions() {
+  const search = (document.getElementById('txnSearch')?.value || '').toLowerCase();
+  const filterCat = document.getElementById('txnFilter')?.value || '';
+  const filterCard = document.getElementById('txnCardFilter')?.value || '';
+
+  // Populate filter options once
+  const sel = document.getElementById('txnFilter');
+  if (sel && sel.options.length <= 1) {
+    CATEGORIES.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.name; opt.textContent = c.name;
+      sel.appendChild(opt);
+    });
+  }
+
+  let txns = [...currentTxns()].sort((a, b) => b.date.localeCompare(a.date));
+  if (search) txns = txns.filter(t => t.merchant.toLowerCase().includes(search) || t.category.toLowerCase().includes(search));
+  if (filterCat) txns = txns.filter(t => t.category === filterCat);
+  if (filterCard) txns = txns.filter(t => t.card === filterCard);
+
+  const body = document.getElementById('txnListBody');
+  if (txns.length === 0) {
+    body.innerHTML = `<div class="empty">🧾<p>No transactions yet for ${monthLabel()}</p></div>`;
+    return;
+  }
+
+  body.innerHTML = txns.map(t => `
+    <div class="txn-row">
+      <span class="txn-date">${formatDate(t.date)}</span>
+      <span class="txn-merchant">${escHtml(t.merchant)}</span>
+      <span><span class="txn-cat-badge">${CATEGORIES.find(c=>c.name===t.category)?.emoji||''} ${t.category}</span></span>
+      <span><span class="txn-card-badge ${CARD_CLASS[t.card]||'card-cash'}">${t.card}</span></span>
+      <span class="txn-amount">$${fmt(t.amount)}</span>
+      <button class="btn-del" onclick="deleteTxn('${t.id}')">✕</button>
+    </div>
+  `).join('');
+}
+
+function deleteTxn(id) {
+  const key = storageKey(currentYear, currentMonth);
+  transactions[key] = (transactions[key] || []).filter(t => t.id !== id);
+  saveTransactions();
+  renderAll();
+  toast('Transaction deleted');
+}
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+function renderSettings() {
+  const table = document.getElementById('settingsTable');
+  table.innerHTML = `
+    <tr><th>Category</th><th>Type</th><th style="text-align:right">Monthly Budget (SGD)</th></tr>
+    ${CATEGORIES.map(cat => `
+      <tr>
+        <td>${cat.emoji} ${cat.name}</td>
+        <td>${cat.fixed ? '<span class="fixed-badge">Fixed</span>' : '<span style="font-size:11px;color:var(--muted)">Discretionary</span>'}</td>
+        <td style="text-align:right">
+          <input type="number" id="bud_${cat.name.replace(/\W/g,'_')}"
+            value="${budgets[cat.name] || cat.budget}" min="0" step="1"
+            ${cat.fixed ? 'style="opacity:0.5"' : ''}>
+        </td>
+      </tr>
+    `).join('')}
+  `;
+}
+
+function renderMilesSettings() {
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  set('miles_hsbc', milesConfig.hsbc);
+  set('miles_uob_fashion', milesConfig.uobLadyFashion);
+  set('miles_uob_dining', milesConfig.uobLadyDining);
+  set('miles_kf_annual', milesConfig.kfAnnual);
+  set('miles_fashion_cats', (milesConfig.fashionCats || []).join(', '));
+  set('miles_dining_cats', (milesConfig.diningCats || []).join(', '));
+}
+
+function saveMilesSettings() {
+  const get = (id, def) => parseFloat(document.getElementById(id)?.value) || def;
+  const getCats = (id, def) => {
+    const v = document.getElementById(id)?.value || '';
+    const parsed = v.split(',').map(s => s.trim()).filter(Boolean);
+    return parsed.length ? parsed : def;
+  };
+  milesConfig = {
+    hsbc: get('miles_hsbc', 1000),
+    uobLadyFashion: get('miles_uob_fashion', 750),
+    uobLadyDining: get('miles_uob_dining', 750),
+    kfAnnual: get('miles_kf_annual', 1000),
+    fashionCats: getCats('miles_fashion_cats', ['Luxury Fashion', 'Clothing & Apparel']),
+    diningCats: getCats('miles_dining_cats', ['Fine Dining', 'Casual Dining', 'Cafes & Coffee']),
+  };
+  localStorage.setItem(milesKey(), JSON.stringify(milesConfig));
+  renderDashboard();
+  toast('Miles settings saved ✓');
+}
+
+function saveBudgets() {
+  CATEGORIES.forEach(cat => {
+    const id = `bud_${cat.name.replace(/\W/g,'_')}`;
+    const el = document.getElementById(id);
+    if (el) budgets[cat.name] = parseFloat(el.value) || 0;
+  });
+  localStorage.setItem(budgetKey(), JSON.stringify(budgets));
+  renderDashboard();
+  toast('Budgets saved ✓');
+}
+
+// ─── Add Transaction Modal ───────────────────────────────────────────────────
+function openAddTxn() {
+  const now = new Date();
+  const isCurrentMonth = now.getFullYear() === currentYear && now.getMonth() === currentMonth;
+  document.getElementById('txnDate').value = isCurrentMonth
+    ? now.toISOString().split('T')[0]
+    : `${currentYear}-${String(currentMonth+1).padStart(2,'0')}-01`;
+  document.getElementById('txnMerchant').value = '';
+  document.getElementById('txnAmount').value = '';
+
+  const sel = document.getElementById('txnCategory');
+  sel.innerHTML = CATEGORIES.map(c => `<option value="${c.name}">${c.emoji} ${c.name}</option>`).join('');
+  document.getElementById('addModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('txnMerchant').focus(), 100);
+}
+
+function closeAddTxn() { document.getElementById('addModal').style.display = 'none'; }
+
+function saveTxn() {
+  const date     = document.getElementById('txnDate').value;
+  const merchant = document.getElementById('txnMerchant').value.trim();
+  const category = document.getElementById('txnCategory').value;
+  const card     = document.getElementById('txnCard').value;
+  const amount   = parseFloat(document.getElementById('txnAmount').value);
+
+  if (!date || !merchant || !amount || amount <= 0) { toast('Please fill in all fields'); return; }
+
+  addTxnToStore({ date, merchant, category, card, amount });
+  closeAddTxn();
+  renderAll();
+  toast(`Added $${fmt(amount)} · ${merchant}`);
+}
+
+function addTxnToStore(t) {
+  const key = storageKey(currentYear, currentMonth);
+  if (!transactions[key]) transactions[key] = [];
+  transactions[key].push({ id: Date.now().toString() + Math.random().toString(36).slice(2), date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: t.amount });
+  saveTransactions();
+}
+
+// ─── Import Modal ────────────────────────────────────────────────────────────
+function openImport() {
+  document.getElementById('importJson').value = '';
+  document.getElementById('importResult').style.display = 'none';
+  document.getElementById('importMonthLabel').textContent = monthLabel();
+  document.getElementById('importModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('importJson').focus(), 100);
+}
+
+function closeImport() { document.getElementById('importModal').style.display = 'none'; }
+
+function clearImportResult() { document.getElementById('importResult').style.display = 'none'; }
+
+function parseImportJson() {
+  const raw = document.getElementById('importJson').value.trim();
+  if (!raw) throw new Error('Paste is empty.');
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch(e) { throw new Error('Invalid JSON. ' + e.message); }
+  if (!Array.isArray(parsed)) throw new Error('Expected a JSON array [ ... ].');
+  if (parsed.length === 0) throw new Error('Array is empty — nothing to import.');
+
+  const valid = [], errors = [];
+  parsed.forEach((t, i) => {
+    const missing = [];
+    if (!t.date) missing.push('date');
+    if (!t.merchant) missing.push('merchant');
+    if (!t.category) missing.push('category');
+    if (!t.card) missing.push('card');
+    if (t.amount == null) missing.push('amount');
+    if (missing.length) { errors.push(`Row ${i+1}: missing ${missing.join(', ')}`); return; }
+    if (!VALID_CATS.has(t.category)) { errors.push(`Row ${i+1}: unknown category "${t.category}"`); return; }
+    if (!VALID_CARDS.has(t.card)) { errors.push(`Row ${i+1}: unknown card "${t.card}". Valid: ${CARDS.join(', ')}`); return; }
+    const amt = parseFloat(t.amount);
+    if (isNaN(amt) || amt <= 0) { errors.push(`Row ${i+1}: invalid amount "${t.amount}"`); return; }
+    valid.push({ date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: amt });
+  });
+  return { valid, errors };
+}
+
+function showImportResult(html, ok) {
+  const el = document.getElementById('importResult');
+  el.innerHTML = html;
+  el.className = `import-result ${ok ? 'ok' : 'err'}`;
+  el.style.display = 'block';
+}
+
+function validateImport() {
+  try {
+    const { valid, errors } = parseImportJson();
+    if (errors.length) showImportResult(`⚠️ ${errors.length} error(s):<br>${errors.join('<br>')}`, false);
+    else showImportResult(`✅ ${valid.length} transaction(s) look valid. Click <strong>Import All</strong> to add them.`, true);
+  } catch(e) { showImportResult('❌ ' + e.message, false); }
+}
+
+function processImport() {
+  try {
+    const { valid, errors } = parseImportJson();
+    if (errors.length) {
+      showImportResult(`❌ Fix these errors before importing:<br>${errors.join('<br>')}`, false);
+      return;
+    }
+    valid.forEach(t => addTxnToStore(t));
+    closeImport();
+    renderAll();
+    toast(`✅ Imported ${valid.length} transaction(s)`);
+  } catch(e) { showImportResult('❌ ' + e.message, false); }
+}
+
+// ─── Utilities ───────────────────────────────────────────────────────────────
+function fmt(n) { return (n||0).toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function formatDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d + 'T00:00:00');
+  return dt.toLocaleDateString('en-SG', { day: '2-digit', month: 'short' });
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function clearMonth() {
+  if (!confirm(`Clear all transactions for ${monthLabel()}? This cannot be undone.`)) return;
+  const key = storageKey(currentYear, currentMonth);
+  transactions[key] = [];
+  saveTransactions();
+  renderAll();
+  toast('Month cleared');
+}
+
+function exportData() {
+  const data = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k.startsWith('txns_') || k === budgetKey() || k === milesKey()) data[k] = JSON.parse(localStorage.getItem(k));
+  }
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `budget-backup-${new Date().toISOString().split('T')[0]}.json`; a.click();
+  toast('Backup downloaded');
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+function closeModalOutside(e, id) { if (e.target.classList.contains('overlay')) document.getElementById(id).style.display = 'none'; }
+
+function renderAll() {
+  document.getElementById('monthLabel').textContent = monthLabel();
+  const activePage = document.querySelector('.page.active')?.id?.replace('page-','');
+  if (activePage === 'dashboard') renderDashboard();
+  if (activePage === 'transactions') renderTransactions();
+  if (activePage === 'settings') { renderSettings(); renderMilesSettings(); }
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.getElementById('addModal').style.display = 'none';
+    document.getElementById('importModal').style.display = 'none';
+  }
+  if (e.key === 'Enter' && document.getElementById('addModal').style.display === 'flex') saveTxn();
+});
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+initMonth();
+loadData();
+renderDashboard();
+</script>
+</body>
+</html>
