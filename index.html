@@ -120,6 +120,7 @@
   .card-hsbc { background: rgba(240,82,82,0.15); color: #f87171; }
   .card-cash { background: rgba(245,158,11,0.15); color: var(--orange); }
   .txn-amount { font-size: 13px; font-weight: 600; text-align: right; }
+  .txn-mcc-badge { display: inline-block; margin-top: 3px; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--muted); font-family: 'SF Mono', monospace; letter-spacing: 0.2px; }
   .btn-del { background: none; border: none; color: var(--small); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 4px; }
   .btn-del:hover { color: var(--red); background: rgba(240,82,82,0.1); }
   .btn-edit { background: none; border: none; color: var(--small); cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 4px; }
@@ -492,10 +493,17 @@
         </select>
       </div>
     </div>
-    <div class="form-row">
-      <label>Amount (SGD)</label>
-      <input type="number" id="txnAmount" placeholder="0.00" step="0.01" min="0">
+    <div class="form-grid-2">
+      <div class="form-row">
+        <label>Amount (SGD)</label>
+        <input type="number" id="txnAmount" placeholder="0.00" step="0.01" min="0">
+      </div>
+      <div class="form-row">
+        <label>MCC <span style="color:var(--muted);font-weight:400;font-size:11px;">· optional, auto-suggests category</span></label>
+        <input type="text" id="txnMcc" placeholder="e.g. 5814" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" oninput="onMccInputChange()">
+      </div>
     </div>
+    <div id="txnMccHint" style="font-size:11px;color:var(--muted);margin-top:-8px;margin-bottom:12px;min-height:14px;"></div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeAddTxn()">Cancel</button>
       <button class="btn" id="txnSaveBtn" onclick="saveTxn()">Add Transaction</button>
@@ -608,6 +616,66 @@ const CATEGORY_MIGRATION = {
 };
 
 const CARDS = ["DBS Vantage","HSBC Revolution","UOB Lady's","UOB KrisFlyer","Cash"];
+
+// MCC → { friendly name, suggested category from our consolidated list }
+// Use it to auto-suggest a category when the user enters an MCC.
+const MCC_LOOKUP = {
+  // Food & Groceries
+  "5411": { name: "Grocery Stores",            category: "Groceries" },
+  "5499": { name: "Misc Food Stores",          category: "Groceries" },
+  "5462": { name: "Bakeries",                  category: "Dining Out" },
+  "5812": { name: "Restaurants",               category: "Dining Out" },
+  "5813": { name: "Bars & Pubs",               category: "Dining Out" },
+  "5814": { name: "Fast Food / Delivery",      category: "Dining Out" },
+  // Shopping & Fashion
+  "5311": { name: "Department Stores",         category: "Shopping & Beauty" },
+  "5611": { name: "Men's Clothing",            category: "Fashion" },
+  "5621": { name: "Women's Clothing",          category: "Fashion" },
+  "5641": { name: "Children's Clothing",       category: "Shopping & Beauty" },
+  "5651": { name: "Family Clothing",           category: "Fashion" },
+  "5661": { name: "Shoe Stores",               category: "Fashion" },
+  "5691": { name: "Men's & Women's Clothing",  category: "Fashion" },
+  "5699": { name: "Misc Apparel",              category: "Fashion" },
+  "5944": { name: "Jewelry",                   category: "Fashion" },
+  "5977": { name: "Cosmetics",                 category: "Shopping & Beauty" },
+  "7230": { name: "Beauty / Barber",           category: "Shopping & Beauty" },
+  "5732": { name: "Electronics",               category: "Other" },
+  "5942": { name: "Bookstores",                category: "Other" },
+  "5912": { name: "Drug Stores / Pharmacy",    category: "Medical & Dental" },
+  "5921": { name: "Liquor Stores",             category: "Other" },
+  // Transport
+  "4111": { name: "Bus / MRT / Transit",       category: "Transport" },
+  "4121": { name: "Taxi / Limo",               category: "Transport" },
+  "4789": { name: "Transportation Services",   category: "Transport" },
+  "5541": { name: "Service Stations",          category: "Transport" },
+  // Travel
+  "4511": { name: "Airlines",                  category: "Travel" },
+  "4722": { name: "Travel Agencies",           category: "Travel" },
+  "7011": { name: "Hotels / Lodging",          category: "Travel" },
+  "7512": { name: "Car Rental",                category: "Travel" },
+  // Bills & Subscriptions
+  "4814": { name: "Telco",                     category: "Bills & Subscriptions" },
+  "4899": { name: "Cable / Streaming",         category: "Bills & Subscriptions" },
+  "4900": { name: "Utilities",                 category: "Bills & Subscriptions" },
+  // Entertainment & Wellness
+  "7832": { name: "Cinemas",                   category: "Entertainment" },
+  "7922": { name: "Theatrical Producers",      category: "Entertainment" },
+  "7991": { name: "Tourist Attractions",       category: "Entertainment" },
+  "7997": { name: "Country Clubs / Fitness",   category: "Health & Fitness" },
+  "7298": { name: "Health & Beauty Spas",      category: "Health & Fitness" },
+  // Medical
+  "8011": { name: "Doctors",                   category: "Medical & Dental" },
+  "8021": { name: "Dentists",                  category: "Medical & Dental" },
+  "8041": { name: "Chiropractors",             category: "Medical & Dental" },
+  "8062": { name: "Hospitals",                 category: "Medical & Dental" },
+  // Financial
+  "6011": { name: "ATM / Bank",                category: "Other" },
+  "6012": { name: "Financial Services",        category: "Other" },
+};
+
+function mccDisplayName(mcc) {
+  return MCC_LOOKUP[mcc]?.name || '';
+}
 const VALID_CATS = new Set(CATEGORIES.map(c => c.name));
 const VALID_CARDS = new Set(CARDS);
 
@@ -744,9 +812,10 @@ ${multi ? 'Merge transactions from every image into a single combined JSON array
 - category: choose the closest match from this list — ${catList}
 - card: choose from — ${cardList}. If unclear which card, use "Cash".
 - amount: a positive number in SGD
+- mcc: 4-digit Merchant Category Code IF visible on the statement (e.g. "5814"). Omit the field entirely if not shown.
 
 Return ONLY a JSON array, no prose, no markdown fences. Example:
-[{"date":"${today}","merchant":"NTUC","category":"Groceries","card":"DBS Vantage","amount":42.50}]`;
+[{"date":"${today}","merchant":"NTUC","category":"Groceries","card":"DBS Vantage","amount":42.50,"mcc":"5411"}]`;
 
   let res;
   try {
@@ -1524,10 +1593,15 @@ function renderTransactions() {
     return;
   }
 
-  body.innerHTML = txns.map(t => `
+  body.innerHTML = txns.map(t => {
+    const mccName = t.mcc ? mccDisplayName(t.mcc) : '';
+    const mccBadge = t.mcc
+      ? `<span class="txn-mcc-badge" title="${mccName ? escHtml(mccName) : 'MCC ' + t.mcc}">${t.mcc}${mccName ? ' · ' + escHtml(mccName) : ''}</span>`
+      : '';
+    return `
     <div class="txn-row">
       <span class="txn-date">${formatDate(t.date)}</span>
-      <span class="txn-merchant">${escHtml(t.merchant)}</span>
+      <span class="txn-merchant">${escHtml(t.merchant)}${mccBadge ? '<br>' + mccBadge : ''}</span>
       <span><span class="txn-cat-badge">${CATEGORIES.find(c=>c.name===t.category)?.emoji||''} ${t.category}</span></span>
       <span><span class="txn-card-badge ${CARD_CLASS[t.card]||'card-cash'}">${t.card}</span></span>
       <span class="txn-amount">$${fmt(t.amount)}</span>
@@ -1536,7 +1610,7 @@ function renderTransactions() {
         <button class="btn-del" onclick="deleteTxn('${t.id}')" title="Delete">✕</button>
       </span>
     </div>
-  `).join('');
+  `;}).join('');
 }
 
 function deleteTxn(id) {
@@ -1617,6 +1691,23 @@ function populateTxnCategorySelect() {
     CATEGORIES.map(c => `<option value="${c.name}">${c.emoji} ${c.name}</option>`).join('');
 }
 
+function onMccInputChange() {
+  const raw = (document.getElementById('txnMcc').value || '').trim();
+  const hint = document.getElementById('txnMccHint');
+  if (!raw) { hint.textContent = ''; return; }
+  const entry = MCC_LOOKUP[raw];
+  if (entry) {
+    hint.innerHTML = `<span style="color:var(--accent);">→ ${entry.name}</span> · suggests category <strong>${entry.category}</strong>`;
+    // Auto-pick suggested category (user can override afterwards)
+    const sel = document.getElementById('txnCategory');
+    if (sel && CATEGORIES.some(c => c.name === entry.category)) sel.value = entry.category;
+  } else if (/^\d{4}$/.test(raw)) {
+    hint.innerHTML = `<span style="color:var(--muted);">${raw} — not in lookup; saved as metadata only</span>`;
+  } else {
+    hint.innerHTML = `<span style="color:var(--muted);">4 digits</span>`;
+  }
+}
+
 function openAddTxn() {
   editingTxnId = null;
   document.getElementById('txnModalTitle').textContent = 'Add Transaction';
@@ -1629,6 +1720,8 @@ function openAddTxn() {
     : `${currentYear}-${String(currentMonth+1).padStart(2,'0')}-01`;
   document.getElementById('txnMerchant').value = '';
   document.getElementById('txnAmount').value = '';
+  document.getElementById('txnMcc').value = '';
+  document.getElementById('txnMccHint').textContent = '';
   document.getElementById('txnCard').value = 'DBS Vantage';
 
   populateTxnCategorySelect();
@@ -1651,6 +1744,8 @@ function openEditTxn(id) {
   document.getElementById('txnCategory').value = t.category;
   document.getElementById('txnCard').value = t.card;
   document.getElementById('txnAmount').value = t.amount;
+  document.getElementById('txnMcc').value = t.mcc || '';
+  onMccInputChange();
   document.getElementById('addModal').style.display = 'flex';
   setTimeout(() => document.getElementById('txnMerchant').focus(), 100);
 }
@@ -1666,15 +1761,18 @@ function saveTxn() {
   const category = document.getElementById('txnCategory').value;
   const card     = document.getElementById('txnCard').value;
   const amount   = parseFloat(document.getElementById('txnAmount').value);
+  const mccRaw   = (document.getElementById('txnMcc').value || '').trim();
 
   if (!date || !merchant || !amount || amount <= 0) { toast('Please fill in all fields'); return; }
+  if (mccRaw && !/^\d{4}$/.test(mccRaw)) { toast('MCC must be 4 digits (or empty)'); return; }
+  const mcc = mccRaw || undefined;
 
   if (editingTxnId) {
     const key = storageKey(currentYear, currentMonth);
     const list = transactions[key] || [];
     const idx = list.findIndex(x => x.id === editingTxnId);
     if (idx < 0) { toast('Transaction not found'); return; }
-    list[idx] = { ...list[idx], date, merchant, category, card, amount };
+    list[idx] = { ...list[idx], date, merchant, category, card, amount, mcc };
     saveTransactions();
     closeAddTxn();
     renderAll();
@@ -1682,7 +1780,7 @@ function saveTxn() {
     return;
   }
 
-  addTxnToStore({ date, merchant, category, card, amount });
+  addTxnToStore({ date, merchant, category, card, amount, mcc });
   closeAddTxn();
   renderAll();
   toast(`Added $${fmt(amount)} · ${merchant}`);
@@ -1691,7 +1789,9 @@ function saveTxn() {
 function addTxnToStore(t) {
   const key = storageKey(currentYear, currentMonth);
   if (!transactions[key]) transactions[key] = [];
-  transactions[key].push({ id: Date.now().toString() + Math.random().toString(36).slice(2), date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: t.amount });
+  const row = { id: Date.now().toString() + Math.random().toString(36).slice(2), date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: t.amount };
+  if (t.mcc) row.mcc = String(t.mcc);
+  transactions[key].push(row);
   saveTransactions();
 }
 
@@ -1729,7 +1829,13 @@ function parseImportJson() {
     if (!VALID_CARDS.has(t.card)) { errors.push(`Row ${i+1}: unknown card "${t.card}". Valid: ${CARDS.join(', ')}`); return; }
     const amt = parseFloat(t.amount);
     if (isNaN(amt) || amt <= 0) { errors.push(`Row ${i+1}: invalid amount "${t.amount}"`); return; }
-    valid.push({ date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: amt });
+    const row = { date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: amt };
+    if (t.mcc != null && String(t.mcc).trim() !== '') {
+      const mccStr = String(t.mcc).trim();
+      if (!/^\d{4}$/.test(mccStr)) { errors.push(`Row ${i+1}: invalid mcc "${t.mcc}" (must be 4 digits)`); return; }
+      row.mcc = mccStr;
+    }
+    valid.push(row);
   });
   return { valid, errors };
 }
