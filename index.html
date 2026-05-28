@@ -318,6 +318,7 @@
     </div>
     <div class="btn-group">
       <button class="btn btn-outline" onclick="openScanReceipt()">📸 Scan</button>
+      <button class="btn btn-outline" onclick="enrichTransactionsWithAI()" title="Ask Claude to fill in missing MCCs and verify categories on this month's transactions">✨ Enrich</button>
       <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
     </div>
     <input type="file" id="ocrFileInput" accept="image/*" multiple style="display:none;" onchange="handleScannedReceipt(event)">
@@ -917,6 +918,126 @@ Return ONLY a JSON array, no prose, no markdown fences. Example:
   openImport();
   document.getElementById('importJson').value = cleaned;
   toast(`Extracted from ${files.length} image${files.length === 1 ? '' : 's'} — review then Validate / Import All`);
+}
+
+async function enrichTransactionsWithAI() {
+  const cfg = loadOcrConfig();
+  if (!cfg.apiKey) {
+    toast('Add your Anthropic API key in Budgets → Receipt OCR first');
+    showPage('settings', document.querySelectorAll('.nav-item')[2]);
+    return;
+  }
+
+  const txns = currentTxns();
+  if (txns.length === 0) { toast('No transactions in this month to enrich'); return; }
+
+  const missingMcc = txns.filter(t => !t.mcc).length;
+  const ok = confirm(
+    `Send ${txns.length} transaction${txns.length===1?'':'s'} for ${monthLabel()} to Claude?\n\n` +
+    `• ${missingMcc} missing MCC will be inferred from merchant\n` +
+    `• Categories will be reviewed; only clear mismatches change\n` +
+    `• Date, merchant, card, amount stay unchanged\n\n` +
+    `Uses your Anthropic API key (typically <1¢ per run).`
+  );
+  if (!ok) return;
+
+  toast(`Asking Claude to review ${txns.length} transactions…`);
+
+  const catList = CATEGORIES.map(c => c.name).join(', ');
+  // Only send fields needed for inference; keep IDs for patching
+  const payload = txns.map(t => ({
+    id: t.id,
+    date: t.date,
+    merchant: t.merchant,
+    card: t.card,
+    amount: t.amount,
+    category: t.category,
+    mcc: t.mcc || null,
+  }));
+
+  const prompt = `You are reviewing a user's Singapore credit-card transaction list. For each transaction:
+
+1. If "mcc" is null, infer the most likely 4-digit MCC from the merchant name. Be conservative — if you're unsure, OMIT the mcc field from your patch.
+2. If the current category looks clearly wrong given the merchant (e.g. "Travel" assigned to an obvious restaurant), suggest a corrected category from the list. If the current category is plausible, do NOT change it.
+
+Valid categories (use these exact strings): ${catList}
+
+Return ONLY a JSON array of patches — one entry per transaction that needs updating. Skip transactions that already look correct. Each patch must include the original "id" and only the fields that need to change. Example:
+[{"id":"abc123","mcc":"5814"},{"id":"def456","mcc":"5411","category":"Groceries"}]
+
+Do not wrap in markdown fences. Do not include prose.
+
+Transactions:
+${JSON.stringify(payload, null, 2)}`;
+
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': cfg.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: OCR_MODEL,
+        max_tokens: 8192,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+  } catch (e) {
+    toast('Network error calling Claude');
+    return;
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    toast(`Claude API ${res.status}`);
+    console.warn('Enrich error:', text);
+    return;
+  }
+
+  const body = await res.json();
+  const text = (body?.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim();
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+
+  let patches;
+  try { patches = JSON.parse(cleaned); }
+  catch (e) {
+    toast('Claude returned non-JSON; see console');
+    console.warn('Enrich response:', cleaned);
+    return;
+  }
+  if (!Array.isArray(patches)) { toast('Unexpected response shape; see console'); console.warn(patches); return; }
+
+  const key = storageKey(currentYear, currentMonth);
+  const list = transactions[key] || [];
+  const validCats = new Set(CATEGORIES.map(c => c.name));
+  let mccAdded = 0, mccChanged = 0, catChanged = 0;
+  patches.forEach(p => {
+    if (!p?.id) return;
+    const idx = list.findIndex(t => t.id === p.id);
+    if (idx < 0) return;
+    const t = list[idx];
+    if (p.mcc && /^\d{4}$/.test(String(p.mcc))) {
+      const newMcc = String(p.mcc);
+      if (!t.mcc) { t.mcc = newMcc; mccAdded++; }
+      else if (t.mcc !== newMcc) { t.mcc = newMcc; mccChanged++; }
+    }
+    if (p.category && validCats.has(p.category) && p.category !== t.category) {
+      t.category = p.category;
+      catChanged++;
+    }
+  });
+  saveTransactions();
+  renderAll();
+
+  const parts = [];
+  if (mccAdded)   parts.push(`${mccAdded} MCC added`);
+  if (mccChanged) parts.push(`${mccChanged} MCC corrected`);
+  if (catChanged) parts.push(`${catChanged} categor${catChanged===1?'y':'ies'} fixed`);
+  toast(parts.length ? `Enriched — ${parts.join(', ')}` : 'Reviewed — nothing needed changing');
 }
 
 // ─── Cross-Device Sync (GitHub Gist) ─────────────────────────────────────────
