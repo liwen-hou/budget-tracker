@@ -313,7 +313,6 @@
     </div>
     <div class="btn-group">
       <button class="btn btn-outline" onclick="openScanReceipt()">📸 Scan</button>
-      <button class="btn btn-outline" onclick="openImport()">📥 Import</button>
       <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
     </div>
     <input type="file" id="ocrFileInput" accept="image/*" multiple style="display:none;" onchange="handleScannedReceipt(event)">
@@ -457,7 +456,6 @@
       <div style="font-size:15px;font-weight:700;margin-bottom:12px;">Danger Zone</div>
       <div style="display:flex;gap:10px;">
         <button class="btn btn-outline" onclick="exportData()">Export JSON backup</button>
-        <button class="btn btn-outline" onclick="openImport()">📥 Import transactions</button>
         <button class="btn btn-danger" onclick="clearMonth()">Clear this month's transactions</button>
       </div>
     </div>
