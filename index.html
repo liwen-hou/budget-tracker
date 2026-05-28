@@ -293,9 +293,50 @@
     .card-breakdown { grid-template-columns: 1fr 1fr; }
     .stat-value { font-size: 17px; }
   }
+
+  /* ─── Privacy mode (S7) ─── */
+  body.privacy-on .stat-value,
+  body.privacy-on .card-total,
+  body.privacy-on .budget-amounts strong,
+  body.privacy-on .miles-amounts .spent-val,
+  body.privacy-on .miles-cap-val,
+  body.privacy-on .txn-amount,
+  body.tab-hidden .stat-value,
+  body.tab-hidden .card-total,
+  body.tab-hidden .budget-amounts strong,
+  body.tab-hidden .miles-amounts .spent-val,
+  body.tab-hidden .miles-cap-val,
+  body.tab-hidden .txn-amount {
+    filter: blur(10px);
+    transition: filter 0.2s;
+  }
+
+  /* ─── Unlock / setup overlay ─── */
+  .lock-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 9999; display: none; align-items: center; justify-content: center; padding: 24px; }
+  .lock-overlay.show { display: flex; }
+  .lock-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px 24px; max-width: 380px; width: 100%; }
+  .lock-card h2 { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+  .lock-card p { font-size: 12px; color: var(--muted); margin-bottom: 18px; line-height: 1.5; }
+  .lock-card input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px; margin-bottom: 10px; font-family: inherit; }
+  .lock-card input:focus { outline: none; border-color: var(--accent); }
+  .lock-err { color: var(--red); font-size: 12px; min-height: 16px; margin-bottom: 8px; }
+  .lock-card button.btn { width: 100%; justify-content: center; }
 </style>
 </head>
 <body>
+
+<!-- Unlock / setup overlay (gates the app on boot) -->
+<div class="lock-overlay" id="lockOverlay">
+  <div class="lock-card">
+    <h2 id="lockTitle">🔒 Unlock Budget Tracker</h2>
+    <p id="lockHelp">Enter your passphrase to decrypt your data.</p>
+    <input type="password" id="lockPass1" autocomplete="current-password" placeholder="Passphrase" onkeydown="if(event.key==='Enter')submitLock()">
+    <input type="password" id="lockPass2" autocomplete="new-password" placeholder="Confirm passphrase" style="display:none;" onkeydown="if(event.key==='Enter')submitLock()">
+    <div class="lock-err" id="lockErr"></div>
+    <button class="btn" id="lockBtn" onclick="submitLock()">Unlock</button>
+  </div>
+</div>
+
 <div class="app">
 
 <!-- Sidebar -->
@@ -322,6 +363,7 @@
       <button class="btn-icon" onclick="changeMonth(1)">›</button>
     </div>
     <div class="btn-group" id="topActions">
+      <button class="btn-icon" id="privacyBtn" onclick="togglePrivacy()" title="Privacy mode — blur all amounts">👁️</button>
       <button class="btn btn-outline" onclick="openScanReceipt()">📸 Scan</button>
       <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
     </div>
@@ -777,6 +819,252 @@ function syncConfigKey() { return `sync_config_liwen`; }
 function ocrConfigKey() { return `ocr_config_liwen`; }
 function monthKeyOf(y, m) { return `${y}_${String(m+1).padStart(2,'0')}`; }
 
+// ─── Encryption-at-rest (S5/S6) ──────────────────────────────────────────────
+// AES-GCM with a key derived (PBKDF2/SHA-256, 250k iters) from a user passphrase.
+// All transaction + config + credential keys are stored encrypted in localStorage,
+// and the gist sync payload is encrypted before it leaves the device.
+const ENC_META_KEY     = 'enc_meta_liwen';
+const ENC_SESSION_KEY  = 'enc_session_key_liwen';
+const PRIVACY_PREF_KEY = 'privacy_pref_liwen';
+const ENC_VERIFIER_PT  = 'budget-tracker:ok:v1';
+const ENC_PREFIX       = 'enc:v1:';
+const KDF_ITERATIONS   = 250000;
+
+// Originals captured before the override is installed.
+const origGetItem    = Storage.prototype.getItem;
+const origSetItem    = Storage.prototype.setItem;
+const origRemoveItem = Storage.prototype.removeItem;
+
+let masterKey = null;             // CryptoKey (AES-GCM)
+let plaintextCache = {};          // key → parsed JSON (or raw string)
+let cacheLoaded = false;
+const pendingWrites = new Map();  // key → Promise (in-flight encrypt+persist)
+
+function b64Enc(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+function b64Dec(str) {
+  const bin = atob(str);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function deriveMasterKey(passphrase, saltBytes) {
+  const km = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: saltBytes, iterations: KDF_ITERATIONS, hash: 'SHA-256' },
+    km,
+    { name: 'AES-GCM', length: 256 },
+    true, // extractable — so we can stash the raw key in sessionStorage for reload survival
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function encryptString(plaintext, key = masterKey) {
+  if (!key) throw new Error('encryptString: no master key');
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext)
+  );
+  return ENC_PREFIX + b64Enc(iv) + ':' + b64Enc(new Uint8Array(ct));
+}
+
+async function decryptString(envelope, key = masterKey) {
+  if (!key) throw new Error('decryptString: no master key');
+  if (!envelope.startsWith(ENC_PREFIX)) throw new Error('decryptString: not encrypted');
+  const parts = envelope.slice(ENC_PREFIX.length).split(':');
+  if (parts.length !== 2) throw new Error('decryptString: bad envelope');
+  const iv = b64Dec(parts[0]);
+  const ct = b64Dec(parts[1]);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+  return new TextDecoder().decode(pt);
+}
+
+function loadEncMeta() {
+  try { const raw = origGetItem.call(localStorage, ENC_META_KEY); return raw ? JSON.parse(raw) : null; }
+  catch (e) { return null; }
+}
+function saveEncMeta(meta) {
+  origSetItem.call(localStorage, ENC_META_KEY, JSON.stringify(meta));
+}
+
+function shouldEncryptKey(k) {
+  if (!k) return false;
+  if (k.startsWith('txns_')) return true;
+  return k === budgetKey() || k === milesKey() || k === recurringKey() ||
+         k === recurringAppliedKey() || k === syncConfigKey() || k === ocrConfigKey();
+}
+
+function installStorageOverride() {
+  localStorage.getItem = function(k) {
+    if (shouldEncryptKey(k)) {
+      if (!cacheLoaded || !(k in plaintextCache)) return null;
+      const v = plaintextCache[k];
+      return typeof v === 'string' ? v : JSON.stringify(v);
+    }
+    return origGetItem.call(this, k);
+  };
+  localStorage.setItem = function(k, v) {
+    if (shouldEncryptKey(k)) {
+      try { plaintextCache[k] = JSON.parse(v); } catch (e) { plaintextCache[k] = v; }
+      const p = encryptString(v).then(env => {
+        origSetItem.call(localStorage, k, env);
+      }).catch(e => { console.error('Encrypted write failed', k, e); })
+        .finally(() => { if (pendingWrites.get(k) === p) pendingWrites.delete(k); });
+      pendingWrites.set(k, p);
+      return;
+    }
+    return origSetItem.call(this, k, v);
+  };
+  localStorage.removeItem = function(k) {
+    if (shouldEncryptKey(k)) delete plaintextCache[k];
+    return origRemoveItem.call(this, k);
+  };
+}
+
+async function decryptAllToCache() {
+  plaintextCache = {};
+  // Snapshot keys first — we'll be re-writing during migration.
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (shouldEncryptKey(k)) keys.push(k);
+  }
+  for (const k of keys) {
+    const raw = origGetItem.call(localStorage, k);
+    if (raw == null) continue;
+    if (raw.startsWith(ENC_PREFIX)) {
+      try {
+        const pt = await decryptString(raw);
+        plaintextCache[k] = JSON.parse(pt);
+      } catch (e) { console.error('Decrypt failed for', k, e); }
+    } else {
+      // Legacy plaintext — migrate to ciphertext.
+      try { plaintextCache[k] = JSON.parse(raw); }
+      catch (e) { plaintextCache[k] = raw; }
+      try {
+        const env = await encryptString(
+          typeof plaintextCache[k] === 'string' ? plaintextCache[k] : JSON.stringify(plaintextCache[k])
+        );
+        origSetItem.call(localStorage, k, env);
+      } catch (e) { console.error('Migration encrypt failed', k, e); }
+    }
+  }
+  cacheLoaded = true;
+}
+
+async function stashSessionKey(key) {
+  const raw = await crypto.subtle.exportKey('raw', key);
+  sessionStorage.setItem(ENC_SESSION_KEY, b64Enc(new Uint8Array(raw)));
+}
+async function restoreSessionKey() {
+  const raw = sessionStorage.getItem(ENC_SESSION_KEY);
+  if (!raw) return null;
+  try {
+    return await crypto.subtle.importKey(
+      'raw', b64Dec(raw), 'AES-GCM', true, ['encrypt', 'decrypt']
+    );
+  } catch (e) { return null; }
+}
+
+async function setupPassphrase(passphrase) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await deriveMasterKey(passphrase, salt);
+  masterKey = key;
+  const verifier = await encryptString(ENC_VERIFIER_PT, key);
+  saveEncMeta({ version: 1, salt: b64Enc(salt), verifier, kdf: 'PBKDF2-SHA256', iter: KDF_ITERATIONS });
+  await stashSessionKey(key);
+}
+
+async function unlockWithPassphrase(passphrase) {
+  const meta = loadEncMeta();
+  if (!meta) throw new Error('No encryption set up');
+  const salt = b64Dec(meta.salt);
+  const key = await deriveMasterKey(passphrase, salt);
+  let pt;
+  try { pt = await decryptString(meta.verifier, key); }
+  catch (e) { throw new Error('Wrong passphrase'); }
+  if (pt !== ENC_VERIFIER_PT) throw new Error('Wrong passphrase');
+  masterKey = key;
+  await stashSessionKey(key);
+}
+
+function showLockOverlay({ setup }) {
+  const el = document.getElementById('lockOverlay');
+  document.getElementById('lockTitle').textContent = setup ? '🔒 Set a passphrase' : '🔒 Unlock Budget Tracker';
+  document.getElementById('lockHelp').textContent = setup
+    ? "This encrypts your transactions and sync data. You'll be asked again when you reopen the app. There is no recovery if you forget it."
+    : 'Enter your passphrase to decrypt your data.';
+  document.getElementById('lockPass1').value = '';
+  document.getElementById('lockPass2').value = '';
+  document.getElementById('lockPass2').style.display = setup ? 'block' : 'none';
+  document.getElementById('lockErr').textContent = '';
+  document.getElementById('lockBtn').textContent = setup ? 'Set passphrase' : 'Unlock';
+  el.classList.add('show');
+  setTimeout(() => document.getElementById('lockPass1').focus(), 30);
+}
+function hideLockOverlay() {
+  document.getElementById('lockOverlay').classList.remove('show');
+  document.getElementById('lockPass1').value = '';
+  document.getElementById('lockPass2').value = '';
+}
+
+async function submitLock() {
+  const meta = loadEncMeta();
+  const p1 = document.getElementById('lockPass1').value;
+  const errEl = document.getElementById('lockErr');
+  errEl.textContent = '';
+  const btn = document.getElementById('lockBtn');
+  btn.disabled = true;
+  try {
+    if (!meta) {
+      const p2 = document.getElementById('lockPass2').value;
+      if (p1.length < 8) { errEl.textContent = 'Passphrase must be at least 8 characters.'; return; }
+      if (p1 !== p2)     { errEl.textContent = "Passphrases don't match."; return; }
+      await setupPassphrase(p1);
+    } else {
+      try { await unlockWithPassphrase(p1); }
+      catch (e) { errEl.textContent = e.message || 'Wrong passphrase.'; return; }
+    }
+    installStorageOverride();
+    await decryptAllToCache();
+    hideLockOverlay();
+    await bootApp();
+  } catch (e) {
+    console.error(e);
+    errEl.textContent = e.message || 'Something went wrong.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ─── Privacy mode (S7) ───────────────────────────────────────────────────────
+function loadPrivacyPref() { return origGetItem.call(localStorage, PRIVACY_PREF_KEY) === '1'; }
+function savePrivacyPref(on) { origSetItem.call(localStorage, PRIVACY_PREF_KEY, on ? '1' : '0'); }
+function applyPrivacyPref() {
+  const on = loadPrivacyPref();
+  document.body.classList.toggle('privacy-on', on);
+  const btn = document.getElementById('privacyBtn');
+  if (btn) {
+    btn.textContent = on ? '🙈' : '👁️';
+    btn.title = on ? 'Privacy mode ON — tap to reveal amounts' : 'Privacy mode — blur all amounts';
+  }
+}
+function togglePrivacy() {
+  const next = !loadPrivacyPref();
+  savePrivacyPref(next);
+  applyPrivacyPref();
+  toast(next ? '🙈 Amounts blurred' : '👁️ Amounts visible');
+}
+document.addEventListener('visibilitychange', () => {
+  document.body.classList.toggle('tab-hidden', document.hidden);
+});
+
 // ─── Receipt OCR (Claude Vision) ─────────────────────────────────────────────
 const OCR_MODEL = 'claude-haiku-4-5';
 
@@ -1060,7 +1348,7 @@ function syncableKeys() {
   return [budgetKey(), milesKey(), recurringKey(), recurringAppliedKey()];
 }
 
-function gatherSyncPayload() {
+async function gatherSyncPayload() {
   const data = {};
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
@@ -1069,14 +1357,25 @@ function gatherSyncPayload() {
       try { data[k] = JSON.parse(localStorage.getItem(k)); } catch (e) {}
     }
   }
-  return { version: 1, lastModified: new Date().toISOString(), data };
+  // S5: encrypt the data block client-side so the gist holds ciphertext only.
+  const ciphertext = await encryptString(JSON.stringify(data));
+  return { version: 2, encrypted: true, lastModified: new Date().toISOString(), ciphertext };
 }
 
-function applySyncPayload(env) {
-  if (!env || !env.data) return;
-  // Replace all syncable keys with what's in the envelope
-  // First, remove any local txns_*/syncable keys not in envelope (so deletions sync)
-  const remoteKeys = new Set(Object.keys(env.data));
+async function applySyncPayload(env) {
+  if (!env) return;
+  let data;
+  if (env.version === 2 && env.encrypted && env.ciphertext) {
+    try { data = JSON.parse(await decryptString(env.ciphertext)); }
+    catch (e) { throw new Error('Could not decrypt remote payload — different passphrase?'); }
+  } else if (env.data) {
+    data = env.data; // legacy v1 plaintext — accept and let next push re-encrypt
+  } else {
+    return;
+  }
+  // Replace all syncable keys with what's in the payload.
+  // First, remove any local txns_*/syncable keys not present (so deletions propagate).
+  const remoteKeys = new Set(Object.keys(data));
   const toRemove = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
@@ -1084,7 +1383,7 @@ function applySyncPayload(env) {
     if ((k.startsWith('txns_') || syncableKeys().includes(k)) && !remoteKeys.has(k)) toRemove.push(k);
   }
   toRemove.forEach(k => localStorage.removeItem(k));
-  Object.entries(env.data).forEach(([k, v]) => localStorage.setItem(k, JSON.stringify(v)));
+  Object.entries(data).forEach(([k, v]) => localStorage.setItem(k, JSON.stringify(v)));
 }
 
 async function gistApi(method, path, body) {
@@ -1110,10 +1409,10 @@ async function gistApi(method, path, body) {
 async function syncConnect(pat) {
   if (!pat || !pat.trim()) throw new Error('PAT required');
   // Validate and create a private gist with current data
-  const payload = gatherSyncPayload();
   saveSyncConfig({ pat: pat.trim() });
+  const payload = await gatherSyncPayload();
   const gist = await gistApi('POST', '/gists', {
-    description: 'Budget Tracker sync',
+    description: 'Encrypted data',
     public: false,
     files: { [SYNC_FILE]: { content: JSON.stringify(payload, null, 2) } },
   });
@@ -1137,7 +1436,7 @@ async function syncPull() {
   const localSynced = new Date(cfg.lastSyncedAt || 0).getTime();
   // Pull if remote is newer than what we last saw, OR we've never synced
   if (remoteTime > localSynced || !cfg.lastSyncedAt) {
-    applySyncPayload(env);
+    await applySyncPayload(env);
     saveSyncConfig({ ...cfg, lastSyncedAt: env.lastModified });
     return { pulled: true, remoteTime: env.lastModified };
   }
@@ -1147,7 +1446,7 @@ async function syncPull() {
 async function syncPush() {
   const cfg = loadSyncConfig();
   if (!cfg.pat || !cfg.gistId) return { skipped: true };
-  const payload = gatherSyncPayload();
+  const payload = await gatherSyncPayload();
   await gistApi('PATCH', `/gists/${cfg.gistId}`, {
     files: { [SYNC_FILE]: { content: JSON.stringify(payload, null, 2) } },
   });
@@ -1697,7 +1996,7 @@ function milesPanel({ label, subLabel, badgeClass, spent, threshold, rate, note,
         </div>
         <div style="text-align:right">
           <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">${isAnnual ? 'Annual min' : 'Monthly cap'}</div>
-          <div style="font-size:18px;font-weight:700;color:var(--muted);">$${fmt(threshold)}</div>
+          <div class="miles-cap-val" style="font-size:18px;font-weight:700;color:var(--muted);">$${fmt(threshold)}</div>
         </div>
       </div>
       <div class="miles-progress-track">
@@ -2141,14 +2440,15 @@ document.addEventListener('keydown', e => {
 });
 
 // ─── Init ────────────────────────────────────────────────────────────────────
-initMonth();
-loadData();
-document.querySelector('.main')?.setAttribute('data-active', 'dashboard');
-syncMonthPicker();
-renderDashboard();
+async function bootApp() {
+  initMonth();
+  loadData();
+  document.querySelector('.main')?.setAttribute('data-active', 'dashboard');
+  syncMonthPicker();
+  renderDashboard();
+  applyPrivacyPref();
 
-// Background pull on startup (non-blocking; UI is already up)
-(async () => {
+  // Background pull on startup (non-blocking; UI is already up)
   const cfg = loadSyncConfig();
   if (!cfg.pat || !cfg.gistId) return;
   try {
@@ -2169,6 +2469,20 @@ renderDashboard();
     console.warn('Startup sync pull failed:', e.message);
     renderSyncPanel(e.message);
   }
+}
+
+(async () => {
+  // 1) Resume a session-cached key (survives reload in the same tab).
+  const sessKey = await restoreSessionKey();
+  if (sessKey) {
+    masterKey = sessKey;
+    installStorageOverride();
+    await decryptAllToCache();
+    await bootApp();
+    return;
+  }
+  // 2) Else prompt for passphrase (setup if first run, unlock otherwise).
+  showLockOverlay({ setup: !loadEncMeta() });
 })();
 </script>
 </body>
