@@ -315,6 +315,47 @@
     border-color: color-mix(in srgb, var(--card-color, var(--border)) 60%, var(--border));
     box-shadow: 0 6px 18px rgba(0,0,0,0.22);
   }
+  /* Combined card tile — miles caps live on the front, rules on the back */
+  .card-miles-row { margin-top: 10px; }
+  .card-miles-label { display: flex; justify-content: space-between; align-items: baseline; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .card-miles-amounts { font-size: 11px; color: var(--text); font-weight: 600; text-transform: none; letter-spacing: 0; }
+  .card-miles-track { background: var(--surface3); height: 4px; border-radius: 99px; overflow: hidden; }
+  .card-miles-bar   { height: 100%; border-radius: 99px; transform-origin: left center; animation: barFillIn 0.7s cubic-bezier(0.34, 1.45, 0.64, 1) both; }
+  .card-miles-bar.green  { background: linear-gradient(90deg, #10b981, #34d399); }
+  .card-miles-bar.orange { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+  .card-miles-bar.red    { background: linear-gradient(90deg, #dc2626, #f87171); }
+  .card-flip-hint { font-size: 10px; color: var(--small); margin-top: 12px; text-align: right; }
+
+  /* 3D flip card — only applied when the card has miles (.has-back). The
+     FRONT face is statically positioned so it determines the height of
+     the tile; the BACK is absolutely positioned and fills the same box. */
+  .card-stat.has-back { padding: 0; perspective: 1000px; cursor: pointer; }
+  .card-stat.has-back > .card-faces {
+    position: relative; width: 100%; height: 100%;
+    transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-style: preserve-3d;
+  }
+  .card-stat.has-back.flipped > .card-faces { transform: rotateY(180deg); }
+  .card-stat.has-back .card-face {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    padding: 14px 16px;
+    border-radius: var(--radius);
+    box-sizing: border-box;
+  }
+  .card-stat.has-back .card-back {
+    position: absolute; inset: 0;
+    transform: rotateY(180deg);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--card-color, var(--surface2)) 18%, var(--surface2)), var(--surface2));
+    overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
+  .card-back-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; }
+  .card-back-rule  { font-size: 11px; color: var(--muted); line-height: 1.5; margin-bottom: 10px; }
+  .card-back-rule-title { font-weight: 700; color: var(--text); font-size: 12px; margin-bottom: 2px; }
+  .card-back-rule-text  { font-size: 11px; }
+  .card-back-hint  { margin-top: auto; padding-top: 8px; font-size: 10px; color: var(--small); text-align: right; }
+
   /* "+ Add card" tile sits at the end of the carousel */
   .add-card-tile {
     background: transparent;
@@ -644,12 +685,6 @@
 
     <div class="section-title">📂 Budget by Category</div>
     <div class="budget-grid" id="budgetGrid"></div>
-
-    <!-- Miles Tracker — moved to the bottom -->
-    <div class="miles-section">
-      <div class="section-title">✈️ Miles Promo Tracker</div>
-      <div class="miles-grid" id="milesGrid"></div>
-    </div>
   </div>
 
   <!-- TRANSACTIONS PAGE -->
@@ -1814,6 +1849,86 @@ function buildSpendOverview() {
   };
 }
 
+// Build a combined data summary for one card — overall total + any miles
+// caps that apply. Used by the dashboard card carousel (formerly two
+// separate sections — "Spending by Card" and "Miles Promo Tracker" —
+// now folded into one tile per card with a flip face for the rules).
+function cardData(card, txns, cardTotals) {
+  const cardTxns = txns.filter(t => t.card === card);
+  const total = (cardTotals && cardTotals[card]) || 0;
+  const miles = [];
+
+  if (card === 'HSBC Revolution') {
+    miles.push({
+      label: 'Monthly bonus cap',
+      shortLabel: 'Monthly cap',
+      spent: total,
+      cap: milesConfig.hsbc,
+      rate: '4 mpd',
+      note: 'Counts contactless + online spend (dining, shopping, transport, subscriptions). Excludes SimplyGo, fast-food delivery, and OTAs.',
+    });
+  } else if (card === "UOB Lady's") {
+    const fashionSet = new Set(milesConfig.fashionCats || []);
+    const diningSet  = new Set(milesConfig.diningCats || []);
+    const fashionSpent = cardTxns.filter(t => fashionSet.has(t.category)).reduce((s,t)=>s+t.amount, 0);
+    const diningSpent  = cardTxns.filter(t => diningSet.has(t.category)).reduce((s,t)=>s+t.amount, 0);
+    miles.push({
+      label: 'Fashion bonus',
+      shortLabel: 'Fashion',
+      spent: fashionSpent,
+      cap: milesConfig.uobLadyFashion,
+      rate: '4 mpd',
+      note: 'Counts UOB Lady\'s spend in: ' + (milesConfig.fashionCats || []).join(', '),
+    });
+    miles.push({
+      label: 'Dining bonus',
+      shortLabel: 'Dining',
+      spent: diningSpent,
+      cap: milesConfig.uobLadyDining,
+      rate: '4 mpd',
+      note: 'Counts UOB Lady\'s spend in: ' + (milesConfig.diningCats || []).join(', '),
+    });
+  } else if (card === 'UOB KrisFlyer') {
+    const ytd = getKrisFlyerYTD();
+    miles.push({
+      label: 'Annual SIA Group min',
+      shortLabel: 'Annual SIA',
+      spent: ytd,
+      cap: milesConfig.kfAnnual,
+      rate: '3 mpd on SQ/Scoot',
+      note: 'Tracks all UOB KrisFlyer card spend Jan–Dec. Must hit $' + fmt(milesConfig.kfAnnual) + '/year to unlock the 2.4 mpd bonus tier on other spend.',
+    });
+  }
+  // DBS Vantage, Cash, custom cards — no miles tracking → no flip.
+
+  return { card, total, txnCount: cardTxns.length, miles };
+}
+
+function renderMilesRow(m) {
+  const pct = m.cap > 0 ? Math.min(m.spent / m.cap, 1) : 0;
+  const hit = m.spent >= m.cap;
+  const close = !hit && m.spent >= m.cap * 0.75;
+  const barClass = hit ? 'green' : close ? 'orange' : 'red';
+  return `
+    <div class="card-miles-row">
+      <div class="card-miles-label">
+        <span>${m.shortLabel}</span>
+        <span class="card-miles-amounts">$${fmt(m.spent)} / $${fmt(m.cap)}</span>
+      </div>
+      <div class="card-miles-track"><div class="card-miles-bar ${barClass}" style="width:${(pct*100).toFixed(1)}%"></div></div>
+    </div>
+  `;
+}
+
+// Suppress the click that follows a long-press drag, so reordering a card
+// doesn't also flip it.
+let _recentlyReordered = false;
+function flipCard(el) {
+  if (_recentlyReordered) return;
+  if (!el.classList.contains('has-back')) return;
+  el.classList.toggle('flipped');
+}
+
 // Generic long-press drag-to-reorder for a horizontal carousel.
 // dragSelector: which tiles are draggable (e.g. ".card-stat:not(.add-card-tile)").
 // pinnedSelector (optional): a tile that stays at the end (e.g. the + Add tile);
@@ -1881,6 +1996,10 @@ function setupCarouselReorder({ containerId, dragSelector, pinnedSelector, idAtt
       .map(t => t.dataset[idAttr])
       .filter(Boolean);
     commit(newOrder);
+    // Block the click that's about to fire so we don't flip the card we
+    // just dropped.
+    _recentlyReordered = true;
+    setTimeout(() => { _recentlyReordered = false; }, 250);
     dragging = null;
   };
   container.addEventListener('pointerup',     endDrag);
@@ -2698,20 +2817,39 @@ function renderDashboard() {
   const cardTotals = {};
   CARDS.forEach(c => cardTotals[c] = 0);
   txns.forEach(t => { if (cardTotals[t.card] !== undefined) cardTotals[t.card] += t.amount; });
-  const CARD_COLOR = {
-    "DBS Vantage":     "#4f8ef7",
-    "HSBC Revolution": "#ef4444",
-    "UOB Lady's":      "#22c55e",
-    "UOB KrisFlyer":   "#7c5cbf",
-    "Cash":            "#f59e0b",
-  };
-  const cardsHtml = CARDS.map(card => `
-    <div class="card-stat" data-card="${escHtml(card)}" style="--card-color: ${CARD_COLOR[card] || 'var(--border)'};">
-      <div class="card-name"><span class="txn-card-badge ${CARD_CLASS[card] || ''}" ${cardBadgeStyle(card)}>${card}</span></div>
-      <div class="card-total" style="margin-top:8px;">$${fmt(cardTotals[card] || 0)}</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:2px;">${txns.filter(t=>t.card===card).length} txns</div>
-    </div>
-  `).join('');
+  const cardsHtml = CARDS.map(card => {
+    const data = cardData(card, txns, cardTotals);
+    const colorVar = `--card-color: ${CARD_COLOR[card] || 'var(--border)'};`;
+    const badgeHtml = `<span class="txn-card-badge ${CARD_CLASS[card] || ''}" ${cardBadgeStyle(card)}>${card}</span>`;
+    const frontInner = `
+      <div class="card-name">${badgeHtml}</div>
+      <div class="card-total" style="margin-top:8px;">$${fmt(data.total)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px;">${data.txnCount} txn${data.txnCount===1?'':'s'}</div>
+      ${data.miles.map(renderMilesRow).join('')}
+      ${data.miles.length ? `<div class="card-flip-hint">tap for rules ↻</div>` : ''}
+    `;
+    if (!data.miles.length) {
+      return `<div class="card-stat" data-card="${escHtml(card)}" style="${colorVar}">${frontInner}</div>`;
+    }
+    const backInner = `
+      <div class="card-back-title">${badgeHtml} <span style="color:var(--small);font-weight:400;margin-left:6px;">rules</span></div>
+      ${data.miles.map(m => `
+        <div class="card-back-rule">
+          <div class="card-back-rule-title">${m.label} · ${m.rate}</div>
+          <div class="card-back-rule-text">${m.note}</div>
+        </div>
+      `).join('')}
+      <div class="card-back-hint">tap to flip back ↺</div>
+    `;
+    return `
+      <div class="card-stat has-back" data-card="${escHtml(card)}" style="${colorVar}" onclick="flipCard(this)">
+        <div class="card-faces">
+          <div class="card-face card-front">${frontInner}</div>
+          <div class="card-face card-back">${backInner}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
   const addTile = `
     <div class="card-stat add-card-tile" onclick="openAddCardModal()" title="Add a new card">
       <div class="add-card-plus">＋</div>
@@ -2720,8 +2858,7 @@ function renderDashboard() {
   `;
   document.getElementById('cardBreakdown').innerHTML = cardsHtml + addTile;
 
-  // Miles tracker
-  renderMilesTracker(txns, cardTotals);
+  // Miles is now folded into each card's flip face — no standalone section.
 
   // Budget bars
   const spentByCategory = {};
@@ -3275,7 +3412,6 @@ async function bootApp() {
   syncMonthPicker();
   renderDashboard();
   setupCardReorder();
-  setupMilesReorder();
   applyPrivacyPref();
 
   // Background pull on startup (non-blocking; UI is already up)
