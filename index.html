@@ -131,11 +131,33 @@
   .stat-value.orange { color: var(--orange); }
   .stat-sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
 
-  /* Miles tracker */
+  /* Miles tracker — horizontal carousel */
   .miles-section { margin-bottom: 24px; }
   .miles-section-title { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
-  .miles-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .miles-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .miles-grid {
+    display: flex; gap: 12px;
+    overflow-x: auto; scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding-bottom: 4px;
+  }
+  .miles-grid::-webkit-scrollbar { height: 4px; }
+  .miles-grid::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 99px; }
+  .miles-grid::-webkit-scrollbar-track { background: transparent; }
+  .miles-card {
+    flex: 0 0 300px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--card-color, var(--border));
+    border-radius: var(--radius); padding: 16px 18px;
+    scroll-snap-align: start;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .miles-card:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--card-color, var(--border)) 60%, var(--border));
+    box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+  }
   .miles-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
   .miles-card-name { font-size: 14px; font-weight: 700; }
   .miles-badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; white-space: nowrap; }
@@ -273,6 +295,25 @@
     border-color: color-mix(in srgb, var(--card-color, var(--border)) 60%, var(--border));
     box-shadow: 0 6px 18px rgba(0,0,0,0.22);
   }
+  /* "+ Add card" tile sits at the end of the carousel */
+  .add-card-tile {
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-left: 3px dashed var(--border);
+    color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    cursor: pointer;
+  }
+  .add-card-tile:hover {
+    color: var(--text);
+    border-color: var(--accent);
+    border-left-color: var(--accent);
+    background: rgba(79,142,247,0.06);
+    transform: translateY(-1px);
+  }
+  .add-card-plus { font-size: 28px; line-height: 1; margin-bottom: 4px; }
+  .add-card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
   .card-name { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
   .card-total { font-size: 18px; font-weight: 700; }
 
@@ -345,19 +386,19 @@
     .card-total { font-size: 14px; }
     .card-name { font-size: 10px; }
 
-    /* Miles grid — single column, compact card */
-    .miles-grid { grid-template-columns: 1fr; gap: 8px; }
-    .miles-card { padding: 10px 12px; }
-    .miles-card-header { margin-bottom: 6px; }
+    /* Miles carousel — edge bleed, compact card */
+    .miles-grid { gap: 10px; margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+    .miles-card { flex: 0 0 270px; padding: 12px 14px; }
+    .miles-card-header { margin-bottom: 8px; }
     .miles-card-name { font-size: 13px; }
     .miles-badge { font-size: 10px; padding: 2px 8px; }
-    .miles-amounts { margin-bottom: 6px; }
+    .miles-amounts { margin-bottom: 8px; }
     .miles-amounts > div > div:first-child { font-size: 10px; margin-bottom: 0 !important; }
-    .miles-amounts .spent-val { font-size: 15px; }
-    .miles-cap-val { font-size: 15px !important; }
+    .miles-amounts .spent-val { font-size: 16px; }
+    .miles-cap-val { font-size: 16px !important; }
     .miles-progress-track { height: 5px; }
     .miles-footer { font-size: 10px; margin-top: 6px; }
-    .miles-card-note { display: none; } /* hide rule blurb on mobile to save space */
+    .miles-card-note { font-size: 10px; margin-top: 8px; padding-top: 8px; } /* show again now that we have horizontal room */
 
     /* Budget grid — 2 per row, tight cards */
     .budget-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -477,6 +518,24 @@
   <button class="fab privacy-fab" id="privacyBtn" onclick="togglePrivacy()" title="Privacy mode — blur all amounts" aria-label="Toggle privacy mode">👁️</button>
 </div>
 
+<!-- Add Card modal -->
+<div class="overlay" id="addCardModal" style="display:none;" onclick="closeModalOutside(event, 'addCardModal')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>＋ Add a Card</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">New cards show up in the dashboard carousel, the Add Transaction form, the filter dropdown, and OCR card detection.</p>
+    <div class="form-row">
+      <label>Card name</label>
+      <input type="text" id="newCardName" placeholder="e.g. UOB EVOL" maxlength="40" autocomplete="off"
+             onkeydown="if(event.key==='Enter')submitAddCard()">
+    </div>
+    <div id="addCardErr" style="color:var(--red);font-size:12px;min-height:14px;margin-bottom:8px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeAddCardModal()">Cancel</button>
+      <button class="btn" onclick="submitAddCard()">Add card</button>
+    </div>
+  </div>
+</div>
+
 <!-- AI Spending Analysis modal -->
 <div class="overlay" id="analysisModal" style="display:none;" onclick="closeModalOutside(event, 'analysisModal')">
   <div class="modal" onclick="event.stopPropagation()">
@@ -563,11 +622,6 @@
       </select>
       <select id="txnCardFilter" onchange="renderTransactions()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;outline:none;">
         <option value="">All cards</option>
-        <option value="DBS Vantage">DBS Vantage</option>
-        <option value="HSBC Revolution">HSBC Revolution</option>
-        <option value="UOB Lady's">UOB Lady's</option>
-        <option value="UOB KrisFlyer">UOB KrisFlyer</option>
-        <option value="Cash">Cash</option>
       </select>
       <button class="btn btn-outline" style="margin-left:auto;" onclick="enrichTransactionsWithAI()" title="Ask Claude to fill in missing MCCs and verify categories on this month's transactions">✨ Enrich with AI</button>
     </div>
@@ -705,13 +759,7 @@
       </div>
       <div class="form-row">
         <label>Card</label>
-        <select id="txnCard">
-          <option value="DBS Vantage">DBS Vantage</option>
-          <option value="HSBC Revolution">HSBC Revolution</option>
-          <option value="UOB Lady's">UOB Lady's</option>
-          <option value="UOB KrisFlyer">UOB KrisFlyer</option>
-          <option value="Cash">Cash</option>
-        </select>
+        <select id="txnCard"></select>
       </div>
     </div>
     <div class="form-grid-2">
@@ -747,13 +795,7 @@
       </div>
       <div class="form-row">
         <label>Card</label>
-        <select id="recCard">
-          <option value="DBS Vantage">DBS Vantage</option>
-          <option value="HSBC Revolution">HSBC Revolution</option>
-          <option value="UOB Lady's">UOB Lady's</option>
-          <option value="UOB KrisFlyer">UOB KrisFlyer</option>
-          <option value="Cash">Cash</option>
-        </select>
+        <select id="recCard"></select>
       </div>
     </div>
     <div class="form-grid-2">
@@ -836,7 +878,18 @@ const CATEGORY_MIGRATION = {
   "Lifestyle Services":    "Other",
 };
 
-const CARDS = ["DBS Vantage","HSBC Revolution","UOB Lady's","UOB KrisFlyer","Cash"];
+const DEFAULT_CARDS = ["DBS Vantage","HSBC Revolution","UOB Lady's","UOB KrisFlyer","Cash"];
+const DEFAULT_CARD_COLOR = {
+  "DBS Vantage":     "#4f8ef7",
+  "HSBC Revolution": "#ef4444",
+  "UOB Lady's":      "#22c55e",
+  "UOB KrisFlyer":   "#7c5cbf",
+  "Cash":            "#f59e0b",
+};
+const CUSTOM_CARD_PALETTE = ["#14b8a6","#ec4899","#f97316","#a855f7","#06b6d4","#84cc16","#f43f5e","#0ea5e9"];
+
+let CARDS       = [...DEFAULT_CARDS];
+let CARD_COLOR  = {...DEFAULT_CARD_COLOR};
 
 // MCC → { friendly name, suggested category from our consolidated list }
 // Use it to auto-suggest a category when the user enters an MCC.
@@ -956,7 +1009,51 @@ function getMissedBonus(t) {
   return null;
 }
 const VALID_CATS = new Set(CATEGORIES.map(c => c.name));
-const VALID_CARDS = new Set(CARDS);
+let VALID_CARDS = new Set(CARDS);
+
+function cardsKey() { return 'cards_liwen'; }
+function loadCustomCards() {
+  try { return JSON.parse(localStorage.getItem(cardsKey()) || '[]'); } catch (e) { return []; }
+}
+function saveCustomCards(list) { localStorage.setItem(cardsKey(), JSON.stringify(list)); triggerSyncPush(); }
+function nextCustomColor() {
+  const used = Object.values(CARD_COLOR);
+  return CUSTOM_CARD_PALETTE.find(c => !used.includes(c)) || CUSTOM_CARD_PALETTE[0];
+}
+function refreshCards() {
+  const custom = loadCustomCards();
+  CARDS = [...DEFAULT_CARDS];
+  CARD_COLOR = {...DEFAULT_CARD_COLOR};
+  custom.forEach(c => {
+    if (!c?.name || CARDS.includes(c.name)) return;
+    CARDS.push(c.name);
+    CARD_COLOR[c.name] = c.color || nextCustomColor();
+  });
+  VALID_CARDS = new Set(CARDS);
+}
+// Inline-style fallback for badges of cards that don't have a preset CSS class
+// (i.e. user-added custom cards). Returns empty string for built-in cards.
+function cardBadgeStyle(card) {
+  if (CARD_CLASS[card]) return '';
+  const color = CARD_COLOR[card] || '#7b809a';
+  return `style="background: color-mix(in srgb, ${color} 18%, transparent); color: ${color};"`;
+}
+function populateCardSelects() {
+  const opts = CARDS.map(c => `<option value="${c}">${c}</option>`).join('');
+  ['txnCard', 'recCard'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = opts;
+    if (cur && CARDS.includes(cur)) sel.value = cur;
+  });
+  const fil = document.getElementById('txnCardFilter');
+  if (fil) {
+    const cur = fil.value;
+    fil.innerHTML = '<option value="">All cards</option>' + opts;
+    if (cur === '' || CARDS.includes(cur)) fil.value = cur;
+  }
+}
 
 const CARD_CLASS = {
   "DBS Vantage":    "card-dbs",
@@ -1069,7 +1166,8 @@ function shouldEncryptKey(k) {
   if (!k) return false;
   if (k.startsWith('txns_')) return true;
   return k === budgetKey() || k === milesKey() || k === recurringKey() ||
-         k === recurringAppliedKey() || k === syncConfigKey() || k === ocrConfigKey();
+         k === recurringAppliedKey() || k === syncConfigKey() || k === ocrConfigKey() ||
+         k === cardsKey();
 }
 
 function installStorageOverride() {
@@ -1632,6 +1730,30 @@ function buildSpendOverview() {
   };
 }
 
+function openAddCardModal() {
+  document.getElementById('newCardName').value = '';
+  document.getElementById('addCardErr').textContent = '';
+  document.getElementById('addCardModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('newCardName').focus(), 40);
+}
+function closeAddCardModal() { document.getElementById('addCardModal').style.display = 'none'; }
+function submitAddCard() {
+  const name = document.getElementById('newCardName').value.trim();
+  const errEl = document.getElementById('addCardErr');
+  if (!name) { errEl.textContent = 'Card name is required'; return; }
+  if (CARDS.some(c => c.toLowerCase() === name.toLowerCase())) {
+    errEl.textContent = 'A card with that name already exists'; return;
+  }
+  const custom = loadCustomCards();
+  custom.push({ name, color: nextCustomColor() });
+  saveCustomCards(custom);
+  refreshCards();
+  populateCardSelects();
+  renderDashboard();
+  closeAddCardModal();
+  toast(`Added "${name}"`);
+}
+
 function openAnalysisModal() {
   document.getElementById('analysisModal').style.display = 'flex';
 }
@@ -1726,7 +1848,7 @@ function loadSyncConfig() {
 function saveSyncConfig(cfg) { localStorage.setItem(syncConfigKey(), JSON.stringify(cfg)); }
 
 function syncableKeys() {
-  return [budgetKey(), milesKey(), recurringKey(), recurringAppliedKey()];
+  return [budgetKey(), milesKey(), recurringKey(), recurringAppliedKey(), cardsKey()];
 }
 
 async function gatherSyncPayload() {
@@ -2402,13 +2524,20 @@ function renderDashboard() {
     "UOB KrisFlyer":   "#7c5cbf",
     "Cash":            "#f59e0b",
   };
-  document.getElementById('cardBreakdown').innerHTML = CARDS.map(card => `
+  const cardsHtml = CARDS.map(card => `
     <div class="card-stat" style="--card-color: ${CARD_COLOR[card] || 'var(--border)'};">
-      <div class="card-name"><span class="txn-card-badge ${CARD_CLASS[card]}">${card}</span></div>
-      <div class="card-total" style="margin-top:8px;">$${fmt(cardTotals[card])}</div>
+      <div class="card-name"><span class="txn-card-badge ${CARD_CLASS[card] || ''}" ${cardBadgeStyle(card)}>${card}</span></div>
+      <div class="card-total" style="margin-top:8px;">$${fmt(cardTotals[card] || 0)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px;">${txns.filter(t=>t.card===card).length} txns</div>
     </div>
   `).join('');
+  const addTile = `
+    <div class="card-stat add-card-tile" onclick="openAddCardModal()" title="Add a new card">
+      <div class="add-card-plus">＋</div>
+      <div class="add-card-label">Add card</div>
+    </div>
+  `;
+  document.getElementById('cardBreakdown').innerHTML = cardsHtml + addTile;
 
   // Miles tracker
   renderMilesTracker(txns, cardTotals);
@@ -2461,7 +2590,8 @@ function getKrisFlyerYTD() {
   return total;
 }
 
-function milesPanel({ label, subLabel, badgeClass, spent, threshold, rate, note, isAnnual }) {
+function milesPanel({ label, subLabel, badgeClass, card, spent, threshold, rate, note, isAnnual }) {
+  const cardColor = CARD_COLOR[card] || 'var(--border)';
   const pct = threshold > 0 ? Math.min(spent / threshold, 1) : 0;
   const hit = spent >= threshold;
   const close = !hit && spent >= threshold * 0.75;
@@ -2471,7 +2601,7 @@ function milesPanel({ label, subLabel, badgeClass, spent, threshold, rate, note,
   const remaining = Math.max(threshold - spent, 0);
   const periodLabel = isAnnual ? 'this year' : 'this month';
   return `
-    <div class="miles-card">
+    <div class="miles-card" style="--card-color: ${cardColor};">
       <div class="miles-card-header">
         <div>
           <div class="miles-card-name">
@@ -2525,6 +2655,7 @@ function renderMilesTracker(txns, cardTotals) {
       label: 'HSBC Revolution',
       subLabel: 'Monthly cap — dining, shopping, transport, online',
       badgeClass: 'card-hsbc',
+      card: 'HSBC Revolution',
       spent: hsbcSpent,
       threshold: milesConfig.hsbc,
       rate: '4 mpd',
@@ -2535,6 +2666,7 @@ function renderMilesTracker(txns, cardTotals) {
       label: "UOB Lady's · Fashion",
       subLabel: milesConfig.fashionCats.join(' · '),
       badgeClass: 'card-uob-lady',
+      card: "UOB Lady's",
       spent: uobFashion,
       threshold: milesConfig.uobLadyFashion,
       rate: '4 mpd',
@@ -2545,6 +2677,7 @@ function renderMilesTracker(txns, cardTotals) {
       label: "UOB Lady's · Dining",
       subLabel: milesConfig.diningCats.join(' · '),
       badgeClass: 'card-uob-lady',
+      card: "UOB Lady's",
       spent: uobDining,
       threshold: milesConfig.uobLadyDining,
       rate: '4 mpd',
@@ -2555,6 +2688,7 @@ function renderMilesTracker(txns, cardTotals) {
       label: 'UOB KrisFlyer',
       subLabel: 'Annual SIA Group minimum · Jan–Dec ' + new Date().getFullYear(),
       badgeClass: 'card-uob-kf',
+      card: 'UOB KrisFlyer',
       spent: kfYTD,
       threshold: milesConfig.kfAnnual,
       rate: '3 mpd on SQ/Scoot',
@@ -2608,7 +2742,7 @@ function renderTransactions() {
       <span class="txn-date">${formatDate(t.date)}</span>
       <span class="txn-merchant">${escHtml(t.merchant)}${subline}</span>
       <span><span class="txn-cat-badge">${CATEGORIES.find(c=>c.name===t.category)?.emoji||''} ${t.category}</span></span>
-      <span><span class="txn-card-badge ${CARD_CLASS[t.card]||'card-cash'}">${t.card}</span></span>
+      <span><span class="txn-card-badge ${CARD_CLASS[t.card] || ''}" ${cardBadgeStyle(t.card)}>${t.card}</span></span>
       <span class="txn-amount">$${fmt(t.amount)}</span>
       <span class="txn-row-actions">
         <button class="btn-edit" onclick="openEditTxn('${t.id}')" title="Edit">✎</button>
@@ -2935,6 +3069,8 @@ document.addEventListener('keydown', e => {
 async function bootApp() {
   initMonth();
   loadData();
+  refreshCards();
+  populateCardSelects();
   document.querySelector('.main')?.setAttribute('data-active', 'dashboard');
   syncMonthPicker();
   renderDashboard();
@@ -2953,6 +3089,8 @@ async function bootApp() {
       if (savedBudgets) budgets = JSON.parse(savedBudgets);
       const savedMiles = localStorage.getItem(milesKey());
       if (savedMiles) milesConfig = Object.assign({}, milesConfig, JSON.parse(savedMiles));
+      refreshCards();
+      populateCardSelects();
       renderAll();
       toast('Pulled latest from sync');
     }
