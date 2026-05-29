@@ -77,7 +77,14 @@
 
   /* Summary row */
   .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; position: relative; overflow: hidden; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  .stat-card:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.22); }
+  .stat-card.vibe-good   { background: linear-gradient(135deg, rgba(52,201,123,0.10), var(--surface) 60%); border-color: rgba(52,201,123,0.25); }
+  .stat-card.vibe-fine   { background: linear-gradient(135deg, rgba(52,201,123,0.06), var(--surface) 60%); }
+  .stat-card.vibe-tight  { background: linear-gradient(135deg, rgba(245,158,11,0.12), var(--surface) 60%); border-color: rgba(245,158,11,0.30); }
+  .stat-card.vibe-danger { background: linear-gradient(135deg, rgba(240,82,82,0.14), var(--surface) 60%); border-color: rgba(240,82,82,0.35); }
+  .vibe-mood { position: absolute; top: 10px; right: 12px; font-size: 28px; line-height: 1; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .stat-card:hover .vibe-mood { transform: scale(1.18) rotate(-8deg); }
   .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
   .stat-value { font-size: 22px; font-weight: 700; }
   .stat-value.green { color: var(--green); }
@@ -109,7 +116,20 @@
 
   /* Budget bars */
   .budget-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px; }
-  .budget-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .budget-item {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--cat-color, transparent) 12%, var(--surface)), var(--surface) 65%);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--cat-color, var(--border));
+    border-radius: var(--radius); padding: 14px 16px;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .budget-item:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--cat-color, var(--border)) 60%, var(--border));
+    box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+  }
+  .budget-item:hover .budget-emoji { transform: scale(1.18) rotate(-6deg); }
+  .budget-emoji { font-size: 18px; margin-right: 6px; display: inline-block; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
   .budget-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
   .budget-cat { font-size: 13px; font-weight: 600; }
   .budget-emoji { font-size: 16px; margin-right: 6px; }
@@ -121,10 +141,11 @@
   .tag-warn { background: rgba(245,158,11,0.15); color: var(--orange); }
   .tag-over { background: rgba(240,82,82,0.15); color: var(--red); }
   .progress-track { background: var(--surface3); border-radius: 99px; height: 6px; overflow: hidden; }
-  .progress-bar { height: 100%; border-radius: 99px; transition: width 0.4s ease; }
-  .progress-bar.green { background: var(--green); }
-  .progress-bar.orange { background: var(--orange); }
-  .progress-bar.red { background: var(--red); }
+  .progress-bar { height: 100%; border-radius: 99px; transform-origin: left center; animation: barFillIn 0.7s cubic-bezier(0.34, 1.45, 0.64, 1) both; }
+  .progress-bar.green  { background: linear-gradient(90deg, #10b981, #34d399); }
+  .progress-bar.orange { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+  .progress-bar.red    { background: linear-gradient(90deg, #dc2626, #f87171); }
+  @keyframes barFillIn { from { transform: scaleX(0); } to { transform: scaleX(1); } }
   .budget-footer { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--muted); }
   .budget-mom { margin-top: 6px; font-size: 11px; display: flex; align-items: center; gap: 6px; }
   .mom-badge { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 11px; letter-spacing: 0.2px; }
@@ -704,19 +725,19 @@
 <script>
 // ─── Data ───────────────────────────────────────────────────────────────────
 const CATEGORIES = [
-  { name: "Dining Out",            emoji: "🍽️",  budget: 1100, fixed: false },
-  { name: "Food Delivery",         emoji: "🥡",  budget: 80,   fixed: false },
-  { name: "Groceries",             emoji: "🛒",  budget: 300,  fixed: false },
-  { name: "Fashion",               emoji: "👗",  budget: 450,  fixed: false },
-  { name: "Shopping & Beauty",     emoji: "💄",  budget: 200,  fixed: false },
-  { name: "Health & Fitness",      emoji: "🏋️",  budget: 692,  fixed: true  },
-  { name: "Travel",                emoji: "✈️",  budget: 833,  fixed: false },
-  { name: "Entertainment",         emoji: "🎭",  budget: 100,  fixed: false },
-  { name: "Bills & Subscriptions", emoji: "📱",  budget: 170,  fixed: true  },
-  { name: "Transport",             emoji: "🚗",  budget: 300,  fixed: false },
-  { name: "Medical & Dental",      emoji: "🏥",  budget: 100,  fixed: false },
-  { name: "Debt & Instalments",    emoji: "🏠",  budget: 1305, fixed: true  },
-  { name: "Other",                 emoji: "📦",  budget: 300,  fixed: false },
+  { name: "Dining Out",            emoji: "🍽️",  budget: 1100, fixed: false, color: "#f97316" }, // orange
+  { name: "Food Delivery",         emoji: "🥡",  budget: 80,   fixed: false, color: "#ef4444" }, // red-orange
+  { name: "Groceries",             emoji: "🛒",  budget: 300,  fixed: false, color: "#22c55e" }, // green
+  { name: "Fashion",               emoji: "👗",  budget: 450,  fixed: false, color: "#ec4899" }, // pink
+  { name: "Shopping & Beauty",     emoji: "💄",  budget: 200,  fixed: false, color: "#d946ef" }, // magenta
+  { name: "Health & Fitness",      emoji: "🏋️",  budget: 692,  fixed: true,  color: "#14b8a6" }, // teal
+  { name: "Travel",                emoji: "✈️",  budget: 833,  fixed: false, color: "#0ea5e9" }, // sky
+  { name: "Entertainment",         emoji: "🎭",  budget: 100,  fixed: false, color: "#a855f7" }, // purple
+  { name: "Bills & Subscriptions", emoji: "📱",  budget: 170,  fixed: true,  color: "#64748b" }, // slate
+  { name: "Transport",             emoji: "🚗",  budget: 300,  fixed: false, color: "#eab308" }, // amber
+  { name: "Medical & Dental",      emoji: "🏥",  budget: 100,  fixed: false, color: "#dc2626" }, // red
+  { name: "Debt & Instalments",    emoji: "🏠",  budget: 1305, fixed: true,  color: "#6366f1" }, // indigo
+  { name: "Other",                 emoji: "📦",  budget: 300,  fixed: false, color: "#78716c" }, // stone
 ];
 
 // Old → new category remapping for users with pre-consolidation data.
@@ -2220,8 +2241,16 @@ function renderDashboard() {
   const dailyAvg = dayOfMonth > 0 ? totalSpent / dayOfMonth : 0;
   const projected = dailyAvg * days;
 
+  // Vibe mood — based on projected pace (more honest than raw spent)
+  const pace = totalBudget > 0 ? projected / totalBudget : 0;
+  const vibe = pace < 0.85 ? { emoji: '😎', cls: 'vibe-good' }
+            : pace < 1.0  ? { emoji: '🙂', cls: 'vibe-fine' }
+            : pace < 1.15 ? { emoji: '😬', cls: 'vibe-tight' }
+            :               { emoji: '🔥', cls: 'vibe-danger' };
+
   document.getElementById('summaryGrid').innerHTML = `
-    <div class="stat-card">
+    <div class="stat-card ${vibe.cls}">
+      <div class="vibe-mood">${vibe.emoji}</div>
       <div class="stat-label">Spent This Month</div>
       <div class="stat-value ${pct > 1 ? 'red' : pct > 0.8 ? 'orange' : 'green'}">$${fmt(totalSpent)}</div>
       <div class="stat-sub">${(pct*100).toFixed(0)}% of $${fmt(totalBudget)} budget</div>
@@ -2274,7 +2303,7 @@ function renderDashboard() {
     const tagClass = cat.fixed ? 'tag-fixed' : over ? 'tag-over' : warn ? 'tag-warn' : 'tag-ok';
     const tagText  = cat.fixed ? 'Fixed' : over ? 'Over' : warn ? 'Near limit' : 'On track';
     return `
-      <div class="budget-item">
+      <div class="budget-item" style="--cat-color: ${cat.color || 'var(--border)'};">
         <div class="budget-header">
           <div>
             <div class="budget-cat"><span class="budget-emoji">${cat.emoji}</span>${cat.name}</div>
