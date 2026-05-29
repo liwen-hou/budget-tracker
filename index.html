@@ -36,12 +36,32 @@
   /* Month picker — looks like a heading, but click → native month/year picker */
   .month-picker { font-size: 20px; font-weight: 700; color: var(--text); background: transparent; border: 1px solid transparent; padding: 4px 8px; border-radius: 6px; min-width: 160px; text-align: center; cursor: pointer; font-family: inherit; color-scheme: dark; }
   .month-picker:hover, .month-picker:focus { border-color: var(--border); background: var(--surface); outline: none; }
-  /* Top actions row: privacy toggle is always visible; Scan/Add hide on Budgets */
-  .top-actions { display: flex; align-items: center; gap: 8px; }
+  /* Hide top action buttons when on the Budgets/Settings page */
   .main[data-active="settings"] #topActions { display: none; }
-  .btn-pill { background: transparent; border: 1px solid var(--border); color: var(--muted); height: 36px; min-width: 36px; padding: 0 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 16px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; transition: all 0.15s; }
-  .btn-pill:hover { color: var(--text); border-color: var(--text); }
-  .btn-pill.active { color: var(--accent); border-color: var(--accent); background: rgba(79,142,247,0.08); }
+
+  /* Floating action buttons — stacked column at bottom-right */
+  .fab-stack { position: fixed; right: 18px; bottom: 24px; z-index: 100; display: flex; flex-direction: column; gap: 10px; }
+  .fab {
+    width: 48px; height: 48px; border-radius: 50%;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--muted); font-size: 20px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    transition: all 0.15s; padding: 0;
+  }
+  .fab:hover  { color: var(--text); border-color: var(--text); }
+  .fab.active { color: var(--accent); border-color: var(--accent); background: rgba(79,142,247,0.12); }
+  .fab:disabled { opacity: 0.6; cursor: wait; }
+  @media (max-width: 700px) {
+    .fab-stack { bottom: 74px; right: 14px; gap: 8px; }
+    .fab { width: 44px; height: 44px; font-size: 18px; }
+  }
+
+  /* AI analysis body inside the modal */
+  .analysis-body { font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; min-height: 60px; padding: 14px; background: var(--surface2); border-radius: var(--radius-sm); margin-bottom: 12px; }
+  .analysis-body.loading { color: var(--muted); font-style: italic; }
+  .analysis-body:empty::before { content: "Tap Generate for a quick read of how this month is going."; color: var(--small); }
+  .analysis-meta  { font-size: 11px; color: var(--small); margin-top: 10px; }
   .btn-icon { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); width: 32px; height: 32px; border-radius: var(--radius-sm); cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
   .btn-icon:hover { color: var(--text); border-color: var(--accent); }
   .btn { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: opacity 0.15s; }
@@ -72,7 +92,7 @@
   .miles-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
   .miles-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
   .miles-card-name { font-size: 14px; font-weight: 700; }
-  .miles-badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; }
+  .miles-badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; white-space: nowrap; }
   .miles-badge.hit { background: rgba(52,201,123,0.2); color: var(--green); }
   .miles-badge.miss { background: rgba(240,82,82,0.2); color: var(--red); }
   .miles-badge.close { background: rgba(245,158,11,0.2); color: var(--orange); }
@@ -228,11 +248,36 @@
     .card-total { font-size: 14px; }
     .card-name { font-size: 10px; }
 
-    /* Miles grid — single column */
-    .miles-grid { grid-template-columns: 1fr; gap: 10px; }
+    /* Miles grid — single column, compact card */
+    .miles-grid { grid-template-columns: 1fr; gap: 8px; }
+    .miles-card { padding: 10px 12px; }
+    .miles-card-header { margin-bottom: 6px; }
+    .miles-card-name { font-size: 13px; }
+    .miles-badge { font-size: 10px; padding: 2px 8px; }
+    .miles-amounts { margin-bottom: 6px; }
+    .miles-amounts > div > div:first-child { font-size: 10px; margin-bottom: 0 !important; }
+    .miles-amounts .spent-val { font-size: 15px; }
+    .miles-cap-val { font-size: 15px !important; }
+    .miles-progress-track { height: 5px; }
+    .miles-footer { font-size: 10px; margin-top: 6px; }
+    .miles-card-note { display: none; } /* hide rule blurb on mobile to save space */
 
-    /* Budget grid — single column */
-    .budget-grid { grid-template-columns: 1fr; gap: 10px; }
+    /* Budget grid — 2 per row, tight cards */
+    .budget-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .budget-item { padding: 10px 11px; }
+    .budget-header { flex-wrap: wrap; margin-bottom: 6px; gap: 2px; }
+    .budget-header > div { flex: 1 0 100%; }       /* name + amounts each get a full row */
+    .budget-cat { font-size: 12px; line-height: 1.2; }
+    .budget-emoji { font-size: 14px; margin-right: 4px; }
+    .budget-tag { display: none; }                  /* status implied by progress bar colour */
+    .budget-amounts { font-size: 11px; line-height: 1.2; }
+    .budget-amounts strong { font-size: 12px; display: inline; margin-right: 4px; }
+    .progress-track { height: 4px; }
+    .budget-footer { font-size: 10px; margin-top: 4px; }
+    .budget-footer span:first-child { display: none; }  /* % is in the bar */
+    .budget-mom { margin-top: 4px; font-size: 9px; gap: 4px; }
+    .budget-mom span:not(.mom-badge) { display: none; } /* hide "vs MMM ($X)" on mobile */
+    .mom-badge { font-size: 9px; padding: 1px 5px; }
 
     /* Transaction filters — wrap */
     #page-transactions > div:first-child { flex-wrap: wrap; }
@@ -329,6 +374,25 @@
 </head>
 <body>
 
+<!-- Floating actions — always reachable, kept out of the top bar -->
+<div class="fab-stack">
+  <button class="fab" id="analysisBtn" onclick="openAnalysisModal()" title="AI spending analysis" aria-label="AI spending analysis">✨</button>
+  <button class="fab privacy-fab" id="privacyBtn" onclick="togglePrivacy()" title="Privacy mode — blur all amounts" aria-label="Toggle privacy mode">👁️</button>
+</div>
+
+<!-- AI Spending Analysis modal -->
+<div class="overlay" id="analysisModal" style="display:none;" onclick="closeModalOutside(event, 'analysisModal')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>✨ AI Spending Analysis</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">One-paragraph take on this month's pace and card caps. Uses your Anthropic API key.</p>
+    <div class="analysis-body" id="analysisBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeAnalysisModal()">Close</button>
+      <button class="btn" id="analysisRegenBtn" onclick="generateSpendAnalysis()">Generate</button>
+    </div>
+  </div>
+</div>
+
 <!-- Unlock / setup overlay (gates the app on boot) -->
 <div class="lock-overlay" id="lockOverlay">
   <div class="lock-card">
@@ -366,12 +430,9 @@
       <input type="month" class="month-picker" id="monthPicker" onchange="onMonthPickerChange()">
       <button class="btn-icon" onclick="changeMonth(1)">›</button>
     </div>
-    <div class="top-actions">
-      <button class="btn-pill" id="privacyBtn" onclick="togglePrivacy()" title="Privacy mode — blur all amounts" aria-label="Toggle privacy mode">👁️</button>
-      <div class="btn-group" id="topActions">
-        <button class="btn btn-outline" onclick="openScanReceipt()">📄 Scan</button>
-        <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
-      </div>
+    <div class="btn-group" id="topActions">
+      <button class="btn btn-outline" onclick="openScanReceipt()">📄 Scan</button>
+      <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
     </div>
     <input type="file" id="ocrFileInput" accept="image/*,application/pdf" multiple style="display:none;" onchange="handleScannedReceipt(event)">
   </div>
@@ -380,6 +441,7 @@
   <div id="page-dashboard" class="page active">
     <div class="summary-grid" id="summaryGrid"></div>
     <div class="card-breakdown" id="cardBreakdown"></div>
+
 
     <!-- Miles Tracker -->
     <div class="miles-section">
@@ -1124,6 +1186,7 @@ document.addEventListener('visibilitychange', () => {
 
 // ─── Receipt OCR (Claude Vision) ─────────────────────────────────────────────
 const OCR_MODEL = 'claude-haiku-4-5';
+const ANALYSIS_MODEL = 'claude-sonnet-4-6';
 
 function loadOcrConfig() {
   try { return JSON.parse(localStorage.getItem(ocrConfigKey()) || '{}'); } catch (e) { return {}; }
@@ -1403,6 +1466,151 @@ ${JSON.stringify(payload, null, 2)}`;
   if (mccChanged) parts.push(`${mccChanged} MCC corrected`);
   if (catChanged) parts.push(`${catChanged} categor${catChanged===1?'y':'ies'} fixed`);
   toast(parts.length ? `Enriched — ${parts.join(', ')}` : 'Reviewed — nothing needed changing');
+}
+
+// ─── AI Spending Analysis ────────────────────────────────────────────────────
+function buildSpendOverview() {
+  const txns = currentTxns();
+  const totalSpent = txns.reduce((s, t) => s + t.amount, 0);
+  const totalBudget = Object.values(budgets).reduce((s, v) => s + (v || 0), 0);
+  const days = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const today = new Date();
+  const dayOfMonth = (today.getFullYear() === currentYear && today.getMonth() === currentMonth)
+    ? today.getDate() : days;
+  const dailyAvg = dayOfMonth > 0 ? totalSpent / dayOfMonth : 0;
+  const projected = dailyAvg * days;
+
+  const perCategory = CATEGORIES.map(c => {
+    const spent = txns.filter(t => t.category === c.name).reduce((s, t) => s + t.amount, 0);
+    const bud = budgets[c.name] ?? c.budget;
+    return { category: c.name, spent: +spent.toFixed(2), budget: +bud, fixed: !!c.fixed };
+  }).filter(c => c.spent > 0 || c.budget > 0);
+
+  const perCard = CARDS.map(card => {
+    const cardTxns = txns.filter(t => t.card === card);
+    return {
+      card,
+      spent: +cardTxns.reduce((s, t) => s + t.amount, 0).toFixed(2),
+      txns: cardTxns.length,
+    };
+  }).filter(c => c.txns > 0);
+
+  const prev = previousMonthData();
+
+  // Miles tracker context (HSBC cap + UOB Lady's caps)
+  const milesContext = {
+    hsbc_cap_sgd: milesConfig.hsbc,
+    hsbc_qualifying_spent: +txns
+      .filter(t => t.card === 'HSBC Revolution')
+      .reduce((s, t) => s + t.amount, 0).toFixed(2),
+    uob_lady_dining_cap: milesConfig.uobLadyDining,
+    uob_lady_dining_spent: +txns
+      .filter(t => t.card === "UOB Lady's" && (milesConfig.diningCats || []).includes(t.category))
+      .reduce((s, t) => s + t.amount, 0).toFixed(2),
+    uob_lady_fashion_cap: milesConfig.uobLadyFashion,
+    uob_lady_fashion_spent: +txns
+      .filter(t => t.card === "UOB Lady's" && (milesConfig.fashionCats || []).includes(t.category))
+      .reduce((s, t) => s + t.amount, 0).toFixed(2),
+  };
+
+  return {
+    month: new Date(currentYear, currentMonth, 1).toLocaleString('en-SG', { month: 'long', year: 'numeric' }),
+    day_of_month: dayOfMonth,
+    days_in_month: days,
+    total_spent_sgd: +totalSpent.toFixed(2),
+    total_budget_sgd: +totalBudget.toFixed(2),
+    daily_average_sgd: +dailyAvg.toFixed(2),
+    projected_month_end_sgd: +projected.toFixed(2),
+    txn_count: txns.length,
+    per_category: perCategory,
+    per_card: perCard,
+    miles_tracker: milesContext,
+    prior_month: prev.hasData
+      ? { label: prev.label, total_spent_sgd: +prev.total.toFixed(2) }
+      : null,
+  };
+}
+
+function openAnalysisModal() {
+  document.getElementById('analysisModal').style.display = 'flex';
+}
+function closeAnalysisModal() {
+  document.getElementById('analysisModal').style.display = 'none';
+}
+
+async function generateSpendAnalysis() {
+  const cfg = loadOcrConfig();
+  if (!cfg.apiKey) {
+    toast('Add your Anthropic API key in Budgets → OCR first');
+    closeAnalysisModal();
+    showPage('settings', document.querySelectorAll('.nav-item')[2]);
+    return;
+  }
+
+  const btn = document.getElementById('analysisRegenBtn');
+  const body = document.getElementById('analysisBody');
+  if (!btn || !body) return;
+  btn.disabled = true;
+  btn.textContent = 'Analyzing…';
+  body.classList.add('loading');
+  body.textContent = 'Asking Claude…';
+
+  const overview = buildSpendOverview();
+  const prompt = `You are a sharp personal finance coach. Look at this user's current-month dashboard data and write ONE paragraph (max 110 words) that:
+- States the headline: are they on/under/over pace? quantify briefly
+- Calls out the 1-2 categories driving the pace (good or bad)
+- Notes any miles-card cap they should chase or avoid wasting
+- Ends with one concrete, specific action for the rest of the month
+
+Be direct and Singaporean-pragmatic. Use SGD. No bullet points, no preamble, no markdown — just the paragraph.
+
+Dashboard data (JSON):
+${JSON.stringify(overview, null, 2)}`;
+
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': cfg.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: ANALYSIS_MODEL,
+        max_tokens: 400,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+  } catch (e) {
+    body.classList.remove('loading');
+    body.textContent = '⚠️ Network error calling Claude';
+    btn.disabled = false;
+    btn.textContent = 'Try again';
+    return;
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    body.classList.remove('loading');
+    body.textContent = `⚠️ Claude API ${res.status}`;
+    console.warn('Analysis API error:', text);
+    btn.disabled = false;
+    btn.textContent = 'Try again';
+    return;
+  }
+
+  const json = await res.json();
+  const text = (json?.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim();
+  body.classList.remove('loading');
+  body.innerHTML = `<div>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+    <div class="analysis-meta">
+      <span>${new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' })}</span>
+      <a onclick="generateSpendAnalysis()">↻ Refresh</a>
+    </div>`;
+  btn.disabled = false;
+  btn.textContent = 'Regenerate';
 }
 
 // ─── Cross-Device Sync (GitHub Gist) ─────────────────────────────────────────
