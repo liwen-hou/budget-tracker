@@ -36,8 +36,12 @@
   /* Month picker — looks like a heading, but click → native month/year picker */
   .month-picker { font-size: 20px; font-weight: 700; color: var(--text); background: transparent; border: 1px solid transparent; padding: 4px 8px; border-radius: 6px; min-width: 160px; text-align: center; cursor: pointer; font-family: inherit; color-scheme: dark; }
   .month-picker:hover, .month-picker:focus { border-color: var(--border); background: var(--surface); outline: none; }
-  /* Hide top action buttons when on the Budgets/Settings page */
+  /* Top actions row: privacy toggle is always visible; Scan/Add hide on Budgets */
+  .top-actions { display: flex; align-items: center; gap: 8px; }
   .main[data-active="settings"] #topActions { display: none; }
+  .btn-pill { background: transparent; border: 1px solid var(--border); color: var(--muted); height: 36px; min-width: 36px; padding: 0 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 16px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .btn-pill:hover { color: var(--text); border-color: var(--text); }
+  .btn-pill.active { color: var(--accent); border-color: var(--accent); background: rgba(79,142,247,0.08); }
   .btn-icon { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); width: 32px; height: 32px; border-radius: var(--radius-sm); cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
   .btn-icon:hover { color: var(--text); border-color: var(--accent); }
   .btn { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: opacity 0.15s; }
@@ -362,12 +366,14 @@
       <input type="month" class="month-picker" id="monthPicker" onchange="onMonthPickerChange()">
       <button class="btn-icon" onclick="changeMonth(1)">›</button>
     </div>
-    <div class="btn-group" id="topActions">
-      <button class="btn-icon" id="privacyBtn" onclick="togglePrivacy()" title="Privacy mode — blur all amounts">👁️</button>
-      <button class="btn btn-outline" onclick="openScanReceipt()">📸 Scan</button>
-      <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
+    <div class="top-actions">
+      <button class="btn-pill" id="privacyBtn" onclick="togglePrivacy()" title="Privacy mode — blur all amounts" aria-label="Toggle privacy mode">👁️</button>
+      <div class="btn-group" id="topActions">
+        <button class="btn btn-outline" onclick="openScanReceipt()">📄 Scan</button>
+        <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
+      </div>
     </div>
-    <input type="file" id="ocrFileInput" accept="image/*" multiple style="display:none;" onchange="handleScannedReceipt(event)">
+    <input type="file" id="ocrFileInput" accept="image/*,application/pdf" multiple style="display:none;" onchange="handleScannedReceipt(event)">
   </div>
 
   <!-- DASHBOARD PAGE -->
@@ -477,8 +483,8 @@
     <!-- Receipt OCR -->
     <div class="card" style="margin-bottom:16px;">
       <div style="margin-bottom:12px;">
-        <div style="font-size:16px;font-weight:700;">📸 Receipt OCR (Claude)</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px;">Snap a receipt or statement screenshot and Claude extracts the transactions. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--accent);">console.anthropic.com</a>. Stored locally on this device only — not synced.</div>
+        <div style="font-size:16px;font-weight:700;">📄 Receipt & Statement OCR (Claude)</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px;">Upload receipt photos or bank statement PDFs — Claude extracts every transaction. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--accent);">console.anthropic.com</a>. Stored locally on this device only — not synced.</div>
       </div>
       <div id="ocrPanel"></div>
     </div>
@@ -1092,6 +1098,7 @@ function applyPrivacyPref() {
   const btn = document.getElementById('privacyBtn');
   if (btn) {
     btn.textContent = on ? '🙈' : '👁️';
+    btn.classList.toggle('active', on);
     btn.title = on ? 'Privacy mode ON — tap to reveal amounts' : 'Privacy mode — blur all amounts';
   }
 }
@@ -1183,14 +1190,23 @@ async function handleScannedReceipt(evt) {
   const cfg = loadOcrConfig();
   if (!cfg.apiKey) { toast('No API key set'); return; }
 
-  toast(`Reading ${files.length} image${files.length === 1 ? '' : 's'}…`);
+  const pdfCount = files.filter(f => f.type === 'application/pdf').length;
+  const imgCount = files.length - pdfCount;
+  const summary = [
+    pdfCount && `${pdfCount} PDF${pdfCount === 1 ? '' : 's'}`,
+    imgCount && `${imgCount} image${imgCount === 1 ? '' : 's'}`,
+  ].filter(Boolean).join(' + ');
+  toast(`Reading ${summary}…`);
 
-  let imageBlocks;
+  let contentBlocks;
   try {
-    imageBlocks = await Promise.all(files.map(async f => ({
-      type: 'image',
-      source: { type: 'base64', media_type: f.type || 'image/jpeg', data: await fileToBase64(f) },
-    })));
+    contentBlocks = await Promise.all(files.map(async f => {
+      const data = await fileToBase64(f);
+      if (f.type === 'application/pdf') {
+        return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } };
+      }
+      return { type: 'image', source: { type: 'base64', media_type: f.type || 'image/jpeg', data } };
+    }));
   } catch (e) {
     toast('Could not read one of the files');
     return;
@@ -1199,15 +1215,20 @@ async function handleScannedReceipt(evt) {
   const today = new Date().toISOString().split('T')[0];
   const catList = CATEGORIES.map(c => c.name).join(', ');
   const cardList = CARDS.join(', ');
-  const multi = files.length > 1;
-  const prompt = `Extract every transaction visible ${multi ? `across all ${files.length} attached receipt or statement images` : 'in this receipt or bank statement image'}.
+  const sourceLabel = pdfCount && imgCount ? 'attached receipts, statements, and PDFs'
+                    : pdfCount > 1 ? `${pdfCount} attached bank statement PDFs`
+                    : pdfCount === 1 ? 'this bank statement PDF'
+                    : imgCount > 1 ? `${imgCount} attached receipt or statement images`
+                    : 'this receipt or statement image';
+  const multi = files.length > 1 || pdfCount >= 1;
+  const prompt = `Extract every transaction visible in ${sourceLabel}.
 
-${multi ? 'Merge transactions from every image into a single combined JSON array. ' : ''}For each transaction return:
-- date: YYYY-MM-DD (if year not visible, use ${today.slice(0,4)}; if no date at all, use ${today})
-- merchant: short description
+${multi ? 'Merge transactions from every page and file into a single combined JSON array, in chronological order. Skip non-transaction rows (opening balance, closing balance, totals, fees summary headers, payments to the card if this is a credit card statement). ' : ''}For each transaction return:
+- date: YYYY-MM-DD (if year not visible, infer from the statement period; if no date at all, use ${today})
+- merchant: short description (clean up redundant codes like reference numbers, location IDs)
 - category: choose the closest match from this list — ${catList}
-- card: choose from — ${cardList}. If unclear which card, use "Cash".
-- amount: a positive number in SGD
+- card: choose from — ${cardList}. If a bank statement makes the source card obvious (e.g. "DBS Vantage Statement"), use it. Otherwise "Cash".
+- amount: a positive number in SGD (use the debit/charge amount, not credit)
 - mcc: 4-digit Merchant Category Code IF visible on the statement (e.g. "5814"). Omit the field entirely if not shown.
 
 Return ONLY a JSON array, no prose, no markdown fences. Example:
@@ -1225,10 +1246,11 @@ Return ONLY a JSON array, no prose, no markdown fences. Example:
       },
       body: JSON.stringify({
         model: OCR_MODEL,
-        max_tokens: 4096,
+        // Bank statements can list 50–100+ transactions per file, so leave room.
+        max_tokens: pdfCount > 0 ? 16384 : 4096,
         messages: [{
           role: 'user',
-          content: [...imageBlocks, { type: 'text', text: prompt }],
+          content: [...contentBlocks, { type: 'text', text: prompt }],
         }],
       }),
     });
@@ -1250,7 +1272,7 @@ Return ONLY a JSON array, no prose, no markdown fences. Example:
 
   openImport();
   document.getElementById('importJson').value = cleaned;
-  toast(`Extracted from ${files.length} image${files.length === 1 ? '' : 's'} — review then Validate / Import All`);
+  toast(`Extracted from ${summary} — review then Validate / Import All`);
 }
 
 async function enrichTransactionsWithAI() {
