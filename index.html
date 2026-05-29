@@ -248,8 +248,31 @@
   .fixed-badge { font-size: 10px; color: var(--accent2); background: rgba(124,92,191,0.15); padding: 2px 6px; border-radius: 99px; }
 
   /* Card breakdown */
-  .card-breakdown { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
-  .card-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+  /* Card breakdown — horizontal carousel */
+  .card-breakdown {
+    display: flex; gap: 10px; margin-bottom: 24px;
+    overflow-x: auto; scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding-bottom: 4px;
+  }
+  .card-breakdown::-webkit-scrollbar { height: 4px; }
+  .card-breakdown::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 99px; }
+  .card-breakdown::-webkit-scrollbar-track { background: transparent; }
+  .card-stat {
+    flex: 0 0 150px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--card-color, transparent) 12%, var(--surface)), var(--surface) 65%);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--card-color, var(--border));
+    border-radius: var(--radius); padding: 14px;
+    scroll-snap-align: start;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .card-stat:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--card-color, var(--border)) 60%, var(--border));
+    box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+  }
   .card-name { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
   .card-total { font-size: 18px; font-weight: 700; }
 
@@ -316,8 +339,9 @@
     .summary-grid { grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
     .stat-value { font-size: 18px; }
 
-    /* Card breakdown — 3 per row (UOB splits into 2, still fits) */
-    .card-breakdown { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+    /* Card breakdown carousel — edge-to-edge bleed and slightly tighter */
+    .card-breakdown { gap: 8px; margin-bottom: 16px; margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+    .card-stat { flex: 0 0 130px; padding: 11px 12px; }
     .card-total { font-size: 14px; }
     .card-name { font-size: 10px; }
 
@@ -412,7 +436,7 @@
   /* Tiny screens (≤380px) */
   @media (max-width: 380px) {
     .summary-grid { grid-template-columns: 1fr; }
-    .card-breakdown { grid-template-columns: 1fr 1fr; }
+    .card-stat { flex: 0 0 120px; }
     .stat-value { font-size: 17px; }
   }
 
@@ -2371,8 +2395,15 @@ function renderDashboard() {
   const cardTotals = {};
   CARDS.forEach(c => cardTotals[c] = 0);
   txns.forEach(t => { if (cardTotals[t.card] !== undefined) cardTotals[t.card] += t.amount; });
+  const CARD_COLOR = {
+    "DBS Vantage":     "#4f8ef7",
+    "HSBC Revolution": "#ef4444",
+    "UOB Lady's":      "#22c55e",
+    "UOB KrisFlyer":   "#7c5cbf",
+    "Cash":            "#f59e0b",
+  };
   document.getElementById('cardBreakdown').innerHTML = CARDS.map(card => `
-    <div class="card-stat">
+    <div class="card-stat" style="--card-color: ${CARD_COLOR[card] || 'var(--border)'};">
       <div class="card-name"><span class="txn-card-badge ${CARD_CLASS[card]}">${card}</span></div>
       <div class="card-total" style="margin-top:8px;">$${fmt(cardTotals[card])}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px;">${txns.filter(t=>t.card===card).length} txns</div>
