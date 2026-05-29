@@ -910,16 +910,26 @@ function shouldEncryptKey(k) {
 }
 
 function installStorageOverride() {
-  localStorage.getItem = function(k) {
-    if (shouldEncryptKey(k)) {
+  // iOS Safari quirk: `localStorage.getItem = fn` is interpreted as
+  // `setItem('getItem', String(fn))` — it stores the function source as a
+  // storage entry instead of installing an instance property, so the override
+  // never actually runs and the app gets back raw ciphertext. Patch the
+  // prototype instead; that path doesn't go through Storage's setItem.
+  // First, sweep up any polluted entries from a previous buggy install.
+  ['getItem', 'setItem', 'removeItem'].forEach(name => {
+    try { origRemoveItem.call(localStorage, name); } catch (e) {}
+  });
+
+  Storage.prototype.getItem = function(k) {
+    if (this === localStorage && shouldEncryptKey(k)) {
       if (!cacheLoaded || !(k in plaintextCache)) return null;
       const v = plaintextCache[k];
       return typeof v === 'string' ? v : JSON.stringify(v);
     }
     return origGetItem.call(this, k);
   };
-  localStorage.setItem = function(k, v) {
-    if (shouldEncryptKey(k)) {
+  Storage.prototype.setItem = function(k, v) {
+    if (this === localStorage && shouldEncryptKey(k)) {
       try { plaintextCache[k] = JSON.parse(v); } catch (e) { plaintextCache[k] = v; }
       const p = encryptString(v).then(env => {
         origSetItem.call(localStorage, k, env);
@@ -930,8 +940,8 @@ function installStorageOverride() {
     }
     return origSetItem.call(this, k, v);
   };
-  localStorage.removeItem = function(k) {
-    if (shouldEncryptKey(k)) delete plaintextCache[k];
+  Storage.prototype.removeItem = function(k) {
+    if (this === localStorage && shouldEncryptKey(k)) delete plaintextCache[k];
     return origRemoveItem.call(this, k);
   };
 }
