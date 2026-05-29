@@ -521,18 +521,18 @@
   }
 
   /* ─── Privacy mode (S7) ─── */
-  body.privacy-on .stat-value,
+  /* Only the hero "Overall" section and the per-card breakdown — budgets,
+     miles, and transactions stay readable. */
+  body.privacy-on .hero-amount,
+  body.privacy-on .hero-of,
+  body.privacy-on .hero-pct,
+  body.privacy-on .hero-chip-value,
   body.privacy-on .card-total,
-  body.privacy-on .budget-amounts strong,
-  body.privacy-on .miles-amounts .spent-val,
-  body.privacy-on .miles-cap-val,
-  body.privacy-on .txn-amount,
-  body.tab-hidden .stat-value,
-  body.tab-hidden .card-total,
-  body.tab-hidden .budget-amounts strong,
-  body.tab-hidden .miles-amounts .spent-val,
-  body.tab-hidden .miles-cap-val,
-  body.tab-hidden .txn-amount {
+  body.tab-hidden .hero-amount,
+  body.tab-hidden .hero-of,
+  body.tab-hidden .hero-pct,
+  body.tab-hidden .hero-chip-value,
+  body.tab-hidden .card-total {
     filter: blur(10px);
     transition: filter 0.2s;
   }
@@ -1638,17 +1638,42 @@ async function enrichTransactionsWithAI() {
     mcc: t.mcc || null,
   }));
 
-  const prompt = `You are reviewing a user's Singapore credit-card transaction list. For each transaction:
+  const prompt = `You are reviewing a Singapore credit-card transaction list. Fill in missing MCCs and fix obviously-wrong categories. Be confident — most Singapore merchants are recognisable even with the noisy prefixes banks add.
 
-1. If "mcc" is null, infer the most likely 4-digit MCC from the merchant name. Be conservative — if you're unsure, OMIT the mcc field from your patch.
-2. If the current category looks clearly wrong given the merchant (e.g. "Travel" assigned to an obvious restaurant), suggest a corrected category from the list. If the current category is plausible, do NOT change it.
+STRIP MERCHANT PREFIXES before classifying. Examples of the same merchant appearing in different forms:
+- "GRAB*SG_XXXXXX", "Grab Rides", "GRAB SINGAPORE", "GRAB*A1B2C3D4" → Grab Rides (taxi)
+- "GRABFOOD*XYZ", "GrabFood SG", "Foodpanda *MERCHANT" → food delivery
+- "POSB AUTO-PAY SINGTEL", "SINGTEL MOBILE PMT" → Singtel
+- "PAYPAL*ACME", "STRIPE*ACME" → look at the merchant after the *
 
-Valid categories (use these exact strings): ${catList}
+SG MERCHANT CHEAT SHEET (use these MCCs unless statement says otherwise):
+- Grab Rides / Gojek / ComfortDelGro / TADA → 4121 → Transport
+- GrabFood / Foodpanda / Deliveroo → 5814 → Food Delivery
+- GrabMart / RedMart → 5411 → Groceries
+- NTUC / FairPrice / Sheng Siong / Cold Storage / Giant / Don Don Donki → 5411 → Groceries
+- Singtel / StarHub / M1 / Circles.Life → 4812 → Bills & Subscriptions
+- SP Group / Senoko / City Energy → 4900 → Bills & Subscriptions
+- Netflix / Spotify / Apple iCloud / Google One / ChatGPT / Disney+ → 5817 → Bills & Subscriptions
+- SQ / Singapore Airlines / Scoot / Jetstar / AirAsia → 3000-3299 (airlines) → Travel
+- Klook / Trip.com / Agoda / Booking.com / Expedia / Airbnb → 4722 → Travel
+- Uniqlo / Zara / H&M / Cotton On / Charles & Keith / Pedro → 5651 / 5621 → Fashion
+- Sephora / Watsons / Guardian / Sephora.sg → 5977 → Shopping & Beauty
+- Shopee / Lazada / Taobao / Amazon → 5399 → varies (Shopping & Beauty / Fashion / Other based on what's typically bought)
+- Apple / Best Denki / Harvey Norman → 5732 → Other
+- Pure Yoga / Anytime Fitness / Ally Health / ClassPass → 7991 / 7298 → Health & Fitness
+- Mount Elizabeth / Raffles Medical / Q&M / Polyclinic → 8062 / 8021 → Medical & Dental
+- Restaurants, hawker stalls, bars, cafes, Starbucks, Coffee Bean → 5812 / 5814 → Dining Out
+- POSB / DBS / OCBC / UOB instalments / repayments / loans → 6012 → Debt & Instalments
 
-Return ONLY a JSON array of patches — one entry per transaction that needs updating. Skip transactions that already look correct. Each patch must include the original "id" and only the fields that need to change. Example:
-[{"id":"abc123","mcc":"5814"},{"id":"def456","mcc":"5411","category":"Groceries"}]
+Rules:
+1. Always fill in MCC when you're confident (the cheat sheet covers most cases). Only omit MCC when the merchant is genuinely unrecognisable.
+2. If the current category is clearly wrong given the merchant (e.g. Grab Rides categorised as Food Delivery), fix it using a category from the valid list. If the existing category is plausible, leave it.
+3. Use ONLY these exact category strings: ${catList}
 
-Do not wrap in markdown fences. Do not include prose.
+Return ONLY a JSON array of patches — one per txn that needs updating. Each patch has the original "id" plus only the fields that should change. Example:
+[{"id":"abc","mcc":"4121","category":"Transport"},{"id":"def","mcc":"5411"}]
+
+No markdown fences, no prose, no commentary.
 
 Transactions:
 ${JSON.stringify(payload, null, 2)}`;
@@ -1664,7 +1689,10 @@ ${JSON.stringify(payload, null, 2)}`;
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: OCR_MODEL,
+        // Sonnet handles merchant-name disambiguation and SG context far
+        // better than Haiku — the previous version was missing obvious
+        // Grab / NTUC / Singtel cases because Haiku played it too safe.
+        model: ANALYSIS_MODEL,
         max_tokens: 8192,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -2760,7 +2788,6 @@ function milesPanel({ id, label, subLabel, badgeClass, card, spent, threshold, r
           <div class="miles-card-name">
             <span class="txn-card-badge ${badgeClass}" style="font-size:12px;padding:3px 10px;">${label}</span>
           </div>
-          ${subLabel ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;">${subLabel}</div>` : ''}
         </div>
         <span class="miles-badge ${badgeCls}">${badgeText}</span>
       </div>
