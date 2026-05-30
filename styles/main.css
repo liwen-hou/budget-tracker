@@ -105,7 +105,23 @@ body::before {
 
 /* Hero block (ring + 3 chip stats) */
 .hero-block { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 24px; margin-bottom: 24px; align-items: center; }
+.hero-ring-stack { display: flex; flex-direction: column; align-items: stretch; }
 .hero-ring { position: relative; width: 100%; max-width: 320px; aspect-ratio: 1; margin: 0 auto; }
+/* MoM comparison sits BELOW the ring (not crammed into the ring's inner
+   area, where a long delta + "vs Apr" wrapped awkwardly on narrow screens).
+   nowrap keeps the badge + label on one line; the ring-width cap matches
+   the visual column. min-height prevents layout jump when prev data is
+   absent (first month of use). */
+.hero-mom {
+  text-align: center;
+  font-size: 11px;
+  color: var(--small);
+  margin: 8px auto 0;
+  max-width: 320px;
+  white-space: nowrap;
+  min-height: 18px;
+}
+.hero-mom .mom-badge { vertical-align: middle; margin-right: 4px; }
 .hero-ring-svg { width: 100%; height: 100%; overflow: visible; }
 .hero-ring-svg circle { fill: none; }
 .ring-track-day  { stroke: var(--surface3); stroke-width: 1.5; opacity: 0.7; }
@@ -627,11 +643,13 @@ body::before {
 body.privacy-on .hero-amount,
 body.privacy-on .hero-of,
 body.privacy-on .hero-pct,
+body.privacy-on .hero-mom,
 body.privacy-on .hero-chip-value,
 body.privacy-on .card-total,
 body.tab-hidden .hero-amount,
 body.tab-hidden .hero-of,
 body.tab-hidden .hero-pct,
+body.tab-hidden .hero-mom,
 body.tab-hidden .hero-chip-value,
 body.tab-hidden .card-total {
   filter: blur(10px);

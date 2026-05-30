@@ -140,7 +140,7 @@ export function renderDashboard() {
       <div class="hero-amount ${pct > 1 ? 'red' : pct > 0.8 ? 'orange' : 'green'}">$${fmt(totalSpent)}</div>
       <div class="hero-divider"></div>
       <div class="hero-of">of $${fmt(totalBudget)}</div>
-      <div class="hero-pct">${(pct * 100).toFixed(0)}% used${prev.hasData ? ` · ${deltaBadge(totalSpent, prev.total)} vs ${prev.label}` : ''}</div>
+      <div class="hero-pct">${(pct * 100).toFixed(0)}% used</div>
     </div>
   `;
 
@@ -164,6 +164,13 @@ export function renderDashboard() {
       <div class="hero-chip-sub">at current pace</div>
     </div>
   `;
+
+  // MoM comparison — sits below the ring (used to be crammed into the
+  // ring's bottom line; the badge + " vs Apr" overflowed the inner
+  // circle on iPhone width).
+  document.getElementById('heroMom').innerHTML = prev.hasData
+    ? `${deltaBadge(totalSpent, prev.total)} vs ${prev.label}`
+    : '';
 
   // Card breakdown carousel
   const cardTotals = {};
