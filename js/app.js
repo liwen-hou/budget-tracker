@@ -30,9 +30,22 @@ import {
   loadRecurring, saveRecurringList, loadRecurringApplied, saveRecurringApplied,
   isCurrentOrFutureMonth,
 } from './domain/recurring.js';
-
-
-
+import {
+  openImport, closeImport, clearImportResult, onImportJsonInput,
+  renderImportEntries, dropImportEntry, validateImport, processImport,
+  setImportContext,
+} from './ui/modals/import.js';
+import { showLockOverlay, hideLockOverlay, submitLock, setLockContext } from './ui/lock.js';
+import { openAddCardModal, closeAddCardModal, submitAddCard, setAddCardContext } from './ui/modals/add-card.js';
+import { openAnalysisModal, closeAnalysisModal } from './ui/modals/analysis.js';
+import {
+  openRecurringModal, closeRecurringModal, saveRecurring, deleteRecurring,
+  renderRecurringList, setRecurringContext,
+} from './ui/modals/recurring.js';
+import {
+  openAddTxn, openEditTxn, closeAddTxn, saveTxn, addTxnToStore,
+  populateTxnCategorySelect, onMccInputChange, setAddTxnContext,
+} from './ui/modals/add-txn.js';
 
 let CARDS       = [...DEFAULT_CARDS];
 let CARD_COLOR  = {...DEFAULT_CARD_COLOR};
@@ -144,54 +157,6 @@ let milesConfig = {
 
 
 
-function showLockOverlay({ setup }) {
-  const el = document.getElementById('lockOverlay');
-  document.getElementById('lockTitle').textContent = setup ? '🔒 Set a passphrase' : '🔒 Unlock Budget Tracker';
-  document.getElementById('lockHelp').textContent = setup
-    ? "This encrypts your transactions and sync data. You'll be asked again when you reopen the app. There is no recovery if you forget it."
-    : 'Enter your passphrase to decrypt your data.';
-  document.getElementById('lockPass1').value = '';
-  document.getElementById('lockPass2').value = '';
-  document.getElementById('lockPass2').style.display = setup ? 'block' : 'none';
-  document.getElementById('lockErr').textContent = '';
-  document.getElementById('lockBtn').textContent = setup ? 'Set passphrase' : 'Unlock';
-  el.classList.add('show');
-  setTimeout(() => document.getElementById('lockPass1').focus(), 30);
-}
-function hideLockOverlay() {
-  document.getElementById('lockOverlay').classList.remove('show');
-  document.getElementById('lockPass1').value = '';
-  document.getElementById('lockPass2').value = '';
-}
-
-async function submitLock() {
-  const meta = loadEncMeta();
-  const p1 = document.getElementById('lockPass1').value;
-  const errEl = document.getElementById('lockErr');
-  errEl.textContent = '';
-  const btn = document.getElementById('lockBtn');
-  btn.disabled = true;
-  try {
-    if (!meta) {
-      const p2 = document.getElementById('lockPass2').value;
-      if (p1.length < 8) { errEl.textContent = 'Passphrase must be at least 8 characters.'; return; }
-      if (p1 !== p2)     { errEl.textContent = "Passphrases don't match."; return; }
-      await setupPassphrase(p1);
-    } else {
-      try { await unlockWithPassphrase(p1); }
-      catch (e) { errEl.textContent = e.message || 'Wrong passphrase.'; return; }
-    }
-    installStorageOverride();
-    await decryptAllToCache();
-    hideLockOverlay();
-    await bootApp();
-  } catch (e) {
-    console.error(e);
-    errEl.textContent = e.message || 'Something went wrong.';
-  } finally {
-    btn.disabled = false;
-  }
-}
 
 // ─── Privacy mode (S7) ───────────────────────────────────────────────────────
 function loadPrivacyPref() { return origGetItem.call(localStorage, PRIVACY_PREF_KEY) === '1'; }
@@ -657,36 +622,7 @@ function setupMilesReorder() {
   });
 }
 
-function openAddCardModal() {
-  document.getElementById('newCardName').value = '';
-  document.getElementById('addCardErr').textContent = '';
-  document.getElementById('addCardModal').style.display = 'flex';
-  setTimeout(() => document.getElementById('newCardName').focus(), 40);
-}
-function closeAddCardModal() { document.getElementById('addCardModal').style.display = 'none'; }
-function submitAddCard() {
-  const name = document.getElementById('newCardName').value.trim();
-  const errEl = document.getElementById('addCardErr');
-  if (!name) { errEl.textContent = 'Card name is required'; return; }
-  if (CARDS.some(c => c.toLowerCase() === name.toLowerCase())) {
-    errEl.textContent = 'A card with that name already exists'; return;
-  }
-  const custom = loadCustomCards();
-  custom.push({ name, color: nextCustomColor() });
-  saveCustomCards(custom);
-  refreshCards();
-  populateCardSelects();
-  renderDashboard();
-  closeAddCardModal();
-  toast(`Added "${name}"`);
-}
 
-function openAnalysisModal() {
-  document.getElementById('analysisModal').style.display = 'flex';
-}
-function closeAnalysisModal() {
-  document.getElementById('analysisModal').style.display = 'none';
-}
 
 async function generateSpendAnalysis() {
   const cfg = loadOcrConfig();
@@ -883,117 +819,6 @@ function applyRecurringForMonth(y, m) {
   }
 }
 
-let editingRecurringId = null;
-
-function openRecurringModal(id) {
-  editingRecurringId = id || null;
-  document.getElementById('recurringModalTitle').textContent = id ? 'Edit Recurring Transaction' : 'Add Recurring Transaction';
-  document.getElementById('recSaveBtn').textContent = id ? 'Save Changes' : 'Add';
-
-  // Populate category dropdown fresh each open
-  document.getElementById('recCategory').innerHTML =
-    CATEGORIES.map(c => `<option value="${c.name}">${c.emoji} ${c.name}</option>`).join('');
-
-  if (id) {
-    const r = loadRecurring().find(x => x.id === id);
-    if (!r) { editingRecurringId = null; toast('Recurring not found'); return; }
-    document.getElementById('recMerchant').value = r.merchant;
-    document.getElementById('recCategory').value = r.category;
-    document.getElementById('recCard').value = r.card;
-    document.getElementById('recAmount').value = r.amount;
-    document.getElementById('recDay').value = r.day;
-  } else {
-    document.getElementById('recMerchant').value = '';
-    document.getElementById('recAmount').value = '';
-    document.getElementById('recDay').value = 1;
-    document.getElementById('recCard').value = 'DBS Vantage';
-  }
-
-  document.getElementById('recurringModal').style.display = 'flex';
-  setTimeout(() => document.getElementById('recMerchant').focus(), 100);
-}
-
-function closeRecurringModal() {
-  document.getElementById('recurringModal').style.display = 'none';
-  editingRecurringId = null;
-}
-
-function saveRecurring() {
-  const merchant = document.getElementById('recMerchant').value.trim();
-  const category = document.getElementById('recCategory').value;
-  const card     = document.getElementById('recCard').value;
-  const amount   = parseFloat(document.getElementById('recAmount').value);
-  const day      = parseInt(document.getElementById('recDay').value, 10);
-
-  if (!merchant || !amount || amount <= 0 || !day || day < 1 || day > 28) {
-    toast('Fill in all fields (day must be 1–28)'); return;
-  }
-
-  const list = loadRecurring();
-  if (editingRecurringId) {
-    const idx = list.findIndex(x => x.id === editingRecurringId);
-    if (idx < 0) { toast('Recurring not found'); return; }
-    list[idx] = { ...list[idx], merchant, category, card, amount, day };
-    saveRecurringList(list);
-    closeRecurringModal();
-    renderRecurringList();
-    toast('Recurring updated ✓');
-    return;
-  }
-
-  const newRec = {
-    id: Date.now().toString() + Math.random().toString(36).slice(2),
-    merchant, category, card, amount, day,
-  };
-  list.push(newRec);
-  saveRecurringList(list);
-  // Auto-apply to current month if applicable
-  applyRecurringForMonth(currentYear, currentMonth);
-  closeRecurringModal();
-  renderRecurringList();
-  renderAll();
-  toast(`Recurring added — ${isCurrentOrFutureMonth(currentYear, currentMonth) ? 'applied to ' + monthLabel() : 'will apply going forward'}`);
-}
-
-function deleteRecurring(id) {
-  const list = loadRecurring().filter(r => r.id !== id);
-  saveRecurringList(list);
-  // Also forget that it was applied, so if re-added it can re-apply
-  const appliedMap = loadRecurringApplied();
-  Object.keys(appliedMap).forEach(mk => {
-    appliedMap[mk] = (appliedMap[mk] || []).filter(rid => rid !== id);
-  });
-  saveRecurringApplied(appliedMap);
-  renderRecurringList();
-  toast('Recurring deleted (existing month transactions kept)');
-}
-
-function renderRecurringList() {
-  const el = document.getElementById('recurringList');
-  if (!el) return;
-  const list = loadRecurring();
-  if (list.length === 0) {
-    el.innerHTML = `<div style="font-size:13px;color:var(--muted);padding:14px;text-align:center;border:1px dashed var(--border);border-radius:8px;">No recurring transactions yet. Add fixed costs like rent, subscriptions, or loan instalments here.</div>`;
-    return;
-  }
-  el.innerHTML = `
-    <div style="display:grid;gap:8px;">
-      ${list.map(r => {
-        const cat = CATEGORIES.find(c => c.name === r.category);
-        return `
-        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:10px 12px;background:var(--surface2);border-radius:8px;font-size:13px;">
-          <div>
-            <div style="font-weight:600;">${escHtml(r.merchant)}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px;">${cat?.emoji||''} ${r.category} · ${r.card} · day ${r.day}</div>
-          </div>
-          <div style="font-weight:700;white-space:nowrap;">$${fmt(r.amount)}</div>
-          <button class="btn-edit" onclick="openRecurringModal('${r.id}')" title="Edit">✎</button>
-          <button class="btn-del" onclick="if(confirm('Delete recurring &quot;${escHtml(r.merchant)}&quot;? Past auto-added rows are kept.')) deleteRecurring('${r.id}')" title="Delete">✕</button>
-        </div>`;
-      }).join('')}
-    </div>
-  `;
-}
 
 function loadData() {
   migrateStoredCategories();
@@ -1507,258 +1332,7 @@ function saveBudgets() {
   toast('Budgets saved ✓');
 }
 
-// ─── Add / Edit Transaction Modal ────────────────────────────────────────────
-let editingTxnId = null;
 
-function populateTxnCategorySelect() {
-  document.getElementById('txnCategory').innerHTML =
-    CATEGORIES.map(c => `<option value="${c.name}">${c.emoji} ${c.name}</option>`).join('');
-}
-
-function onMccInputChange() {
-  const raw = (document.getElementById('txnMcc').value || '').trim();
-  const hint = document.getElementById('txnMccHint');
-  if (!raw) { hint.textContent = ''; return; }
-  const entry = MCC_LOOKUP[raw];
-  if (entry) {
-    hint.innerHTML = `<span style="color:var(--accent);">→ ${entry.name}</span> · suggests category <strong>${entry.category}</strong>`;
-    // Auto-pick suggested category (user can override afterwards)
-    const sel = document.getElementById('txnCategory');
-    if (sel && CATEGORIES.some(c => c.name === entry.category)) sel.value = entry.category;
-  } else if (/^\d{4}$/.test(raw)) {
-    hint.innerHTML = `<span style="color:var(--muted);">${raw} — not in lookup; saved as metadata only</span>`;
-  } else {
-    hint.innerHTML = `<span style="color:var(--muted);">4 digits</span>`;
-  }
-}
-
-function openAddTxn() {
-  editingTxnId = null;
-  document.getElementById('txnModalTitle').textContent = 'Add Transaction';
-  document.getElementById('txnSaveBtn').textContent = 'Add Transaction';
-
-  const now = new Date();
-  const isCurrentMonth = now.getFullYear() === currentYear && now.getMonth() === currentMonth;
-  document.getElementById('txnDate').value = isCurrentMonth
-    ? now.toISOString().split('T')[0]
-    : `${currentYear}-${String(currentMonth+1).padStart(2,'0')}-01`;
-  document.getElementById('txnMerchant').value = '';
-  document.getElementById('txnAmount').value = '';
-  document.getElementById('txnMcc').value = '';
-  document.getElementById('txnMccHint').textContent = '';
-  document.getElementById('txnCard').value = 'DBS Vantage';
-
-  populateTxnCategorySelect();
-  document.getElementById('addModal').style.display = 'flex';
-  setTimeout(() => document.getElementById('txnMerchant').focus(), 100);
-}
-
-function openEditTxn(id) {
-  const key = storageKey(currentYear, currentMonth);
-  const t = (transactions[key] || []).find(x => x.id === id);
-  if (!t) { toast('Transaction not found'); return; }
-
-  editingTxnId = id;
-  document.getElementById('txnModalTitle').textContent = 'Edit Transaction';
-  document.getElementById('txnSaveBtn').textContent = 'Save Changes';
-
-  populateTxnCategorySelect();
-  document.getElementById('txnDate').value = t.date;
-  document.getElementById('txnMerchant').value = t.merchant;
-  document.getElementById('txnCategory').value = t.category;
-  document.getElementById('txnCard').value = t.card;
-  document.getElementById('txnAmount').value = t.amount;
-  document.getElementById('txnMcc').value = t.mcc || '';
-  onMccInputChange();
-  document.getElementById('addModal').style.display = 'flex';
-  setTimeout(() => document.getElementById('txnMerchant').focus(), 100);
-}
-
-function closeAddTxn() {
-  document.getElementById('addModal').style.display = 'none';
-  editingTxnId = null;
-}
-
-function saveTxn() {
-  const date     = document.getElementById('txnDate').value;
-  const merchant = document.getElementById('txnMerchant').value.trim();
-  const category = document.getElementById('txnCategory').value;
-  const card     = document.getElementById('txnCard').value;
-  const amount   = parseFloat(document.getElementById('txnAmount').value);
-  const mccRaw   = (document.getElementById('txnMcc').value || '').trim();
-
-  if (!date || !merchant || !amount || amount <= 0) { toast('Please fill in all fields'); return; }
-  if (mccRaw && !/^\d{4}$/.test(mccRaw)) { toast('MCC must be 4 digits (or empty)'); return; }
-  const mcc = mccRaw || undefined;
-
-  if (editingTxnId) {
-    const key = storageKey(currentYear, currentMonth);
-    const list = transactions[key] || [];
-    const idx = list.findIndex(x => x.id === editingTxnId);
-    if (idx < 0) { toast('Transaction not found'); return; }
-    list[idx] = { ...list[idx], date, merchant, category, card, amount, mcc };
-    saveTransactions();
-    closeAddTxn();
-    renderAll();
-    toast('Transaction updated ✓');
-    return;
-  }
-
-  addTxnToStore({ date, merchant, category, card, amount, mcc });
-  closeAddTxn();
-  renderAll();
-  toast(`Added $${fmt(amount)} · ${merchant}`);
-}
-
-function addTxnToStore(t) {
-  const key = storageKey(currentYear, currentMonth);
-  if (!transactions[key]) transactions[key] = [];
-  const row = { id: Date.now().toString() + Math.random().toString(36).slice(2), date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: t.amount };
-  if (t.mcc) row.mcc = String(t.mcc);
-  transactions[key].push(row);
-  saveTransactions();
-}
-
-// ─── Import Modal ────────────────────────────────────────────────────────────
-function openImport() {
-  document.getElementById('importJson').value = '';
-  document.getElementById('importResult').style.display = 'none';
-  document.getElementById('importMonthLabel').textContent = monthLabel();
-  document.getElementById('importModal').style.display = 'flex';
-  renderImportEntries();
-  setTimeout(() => document.getElementById('importJson').focus(), 100);
-}
-
-function closeImport() { document.getElementById('importModal').style.display = 'none'; }
-
-function clearImportResult() { document.getElementById('importResult').style.display = 'none'; }
-
-function onImportJsonInput() {
-  clearImportResult();
-  renderImportEntries();
-}
-
-// Fingerprint = the identifying fields of a purchase event. Used to flag
-// duplicates in the import review list. Normalisation handles real-world
-// divergences between manual entries, OCR re-scans, and synced data:
-//   • date     → first 10 chars, so "2026-05-19T00:00:00Z" matches "2026-05-19"
-//   • merchant → lowercase + collapsed whitespace + trim, so casing and
-//                trailing spaces don't matter (substring differences like
-//                "NTUC" vs "NTUC FAIRPRICE" intentionally still don't match —
-//                fuzzy matching would produce false positives)
-//   • amount   → abs + 2dp, so sign and trailing zeros don't matter
-//   • card     → trimmed
-// Category and MCC are deliberately excluded — they're post-hoc labels,
-// not part of a purchase's identity. Two entries for the same NTUC charge
-// labelled Groceries vs Shopping are still the same purchase.
-
-
-// Render the per-entry review list whenever the textarea holds a valid JSON
-// array. Each row shows the entry's raw single-line JSON plus a × button to
-// drop it before importing. Rows whose fingerprint already exists in storage
-// get a red tint + "Duplicate" badge. Textarea remains the source of truth.
-function renderImportEntries() {
-  const container = document.getElementById('importEntries');
-  if (!container) return;
-  const raw = document.getElementById('importJson').value.trim();
-  if (!raw) { container.style.display = 'none'; container.innerHTML = ''; return; }
-  let arr;
-  try { arr = JSON.parse(raw); } catch { container.style.display = 'none'; container.innerHTML = ''; return; }
-  if (!Array.isArray(arr) || arr.length === 0) { container.style.display = 'none'; container.innerHTML = ''; return; }
-
-  const existing = buildExistingTxnFingerprints();
-  const flags = arr.map(e => existing.has(txnFingerprint(e)));
-  const dupCount = flags.filter(Boolean).length;
-
-  container.style.display = 'block';
-  container.innerHTML = `
-    <div class="import-entries-header">
-      <span>${arr.length} entr${arr.length === 1 ? 'y' : 'ies'} — review &amp; drop unwanted${dupCount ? ` · <span class="import-entries-dup-count">${dupCount} duplicate${dupCount === 1 ? '' : 's'} flagged</span>` : ''}</span>
-      <span class="hint">× removes one</span>
-    </div>
-    <div class="import-entries-list">
-      ${arr.map((entry, i) => `
-        <div class="import-entry-row${flags[i] ? ' is-duplicate' : ''}">
-          <code class="import-entry-json">${escHtml(JSON.stringify(entry))}</code>
-          ${flags[i] ? '<span class="import-entry-dup-badge" title="Same date, merchant, card, and amount as a saved transaction">Duplicate</span>' : ''}
-          <button class="import-entry-del" onclick="dropImportEntry(${i})" title="Remove">×</button>
-        </div>
-      `).join('')}
-    </div>
-  `;
-}
-
-function dropImportEntry(i) {
-  const ta = document.getElementById('importJson');
-  let arr;
-  try { arr = JSON.parse(ta.value); } catch { return; }
-  if (!Array.isArray(arr) || i < 0 || i >= arr.length) return;
-  arr.splice(i, 1);
-  ta.value = arr.length ? JSON.stringify(arr, null, 2) : '';
-  clearImportResult();
-  renderImportEntries();
-}
-
-function parseImportJson() {
-  const raw = document.getElementById('importJson').value.trim();
-  if (!raw) throw new Error('Paste is empty.');
-  let parsed;
-  try { parsed = JSON.parse(raw); } catch(e) { throw new Error('Invalid JSON. ' + e.message); }
-  if (!Array.isArray(parsed)) throw new Error('Expected a JSON array [ ... ].');
-  if (parsed.length === 0) throw new Error('Array is empty — nothing to import.');
-
-  const valid = [], errors = [];
-  parsed.forEach((t, i) => {
-    const missing = [];
-    if (!t.date) missing.push('date');
-    if (!t.merchant) missing.push('merchant');
-    if (!t.category) missing.push('category');
-    if (!t.card) missing.push('card');
-    if (t.amount == null) missing.push('amount');
-    if (missing.length) { errors.push(`Row ${i+1}: missing ${missing.join(', ')}`); return; }
-    if (!VALID_CATS.has(t.category)) { errors.push(`Row ${i+1}: unknown category "${t.category}"`); return; }
-    if (!VALID_CARDS.has(t.card)) { errors.push(`Row ${i+1}: unknown card "${t.card}". Valid: ${CARDS.join(', ')}`); return; }
-    const amt = parseFloat(t.amount);
-    if (isNaN(amt) || amt <= 0) { errors.push(`Row ${i+1}: invalid amount "${t.amount}"`); return; }
-    const row = { date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: amt };
-    if (t.mcc != null && String(t.mcc).trim() !== '') {
-      const mccStr = String(t.mcc).trim();
-      if (!/^\d{4}$/.test(mccStr)) { errors.push(`Row ${i+1}: invalid mcc "${t.mcc}" (must be 4 digits)`); return; }
-      row.mcc = mccStr;
-    }
-    valid.push(row);
-  });
-  return { valid, errors };
-}
-
-function showImportResult(html, ok) {
-  const el = document.getElementById('importResult');
-  el.innerHTML = html;
-  el.className = `import-result ${ok ? 'ok' : 'err'}`;
-  el.style.display = 'block';
-}
-
-function validateImport() {
-  try {
-    const { valid, errors } = parseImportJson();
-    if (errors.length) showImportResult(`⚠️ ${errors.length} error(s):<br>${errors.join('<br>')}`, false);
-    else showImportResult(`✅ ${valid.length} transaction(s) look valid. Click <strong>Import All</strong> to add them.`, true);
-  } catch(e) { showImportResult('❌ ' + e.message, false); }
-}
-
-function processImport() {
-  try {
-    const { valid, errors } = parseImportJson();
-    if (errors.length) {
-      showImportResult(`❌ Fix these errors before importing:<br>${errors.join('<br>')}`, false);
-      return;
-    }
-    valid.forEach(t => addTxnToStore(t));
-    closeImport();
-    renderAll();
-    toast(`✅ Imported ${valid.length} transaction(s)`);
-  } catch(e) { showImportResult('❌ ' + e.message, false); }
-}
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -1860,6 +1434,44 @@ async function bootApp() {
   // 2) Else prompt for passphrase (setup if first run, unlock otherwise).
   showLockOverlay({ setup: !loadEncMeta() });
 })();
+
+// Inject the bits each ui module needs from app.js state/helpers — avoids
+// circular imports of the module-let mutables. Called once at module load.
+setImportContext({
+  getCards: () => CARDS,
+  getValidCards: () => VALID_CARDS,
+  monthLabel: () => monthLabel(),
+  addTxnToStore: (t) => addTxnToStore(t),
+  renderAll: () => renderAll(),
+  toast: (msg) => toast(msg),
+});
+setLockContext({ onUnlock: () => bootApp() });
+setAddCardContext({
+  getCards: () => CARDS,
+  loadCustomCards: () => loadCustomCards(),
+  saveCustomCards: (l) => saveCustomCards(l),
+  nextCustomColor: () => nextCustomColor(),
+  refreshCards: () => refreshCards(),
+  populateCardSelects: () => populateCardSelects(),
+  renderDashboard: () => renderDashboard(),
+  toast: (msg) => toast(msg),
+});
+setRecurringContext({
+  getCurrentYear: () => currentYear,
+  getCurrentMonth: () => currentMonth,
+  monthLabel: () => monthLabel(),
+  applyRecurringForMonth: (y, m) => applyRecurringForMonth(y, m),
+  renderAll: () => renderAll(),
+  toast: (msg) => toast(msg),
+});
+setAddTxnContext({
+  getCurrentYear: () => currentYear,
+  getCurrentMonth: () => currentMonth,
+  getTransactions: () => transactions,
+  saveTransactions: () => saveTransactions(),
+  renderAll: () => renderAll(),
+  toast: (msg) => toast(msg),
+});
 
 // ─── Inline-handler compatibility shim ───────────────────────────────────────
 // Phase 1 of the refactor — the 65 inline `onclick="…"` etc. attributes in
