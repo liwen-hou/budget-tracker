@@ -23,6 +23,13 @@ import { fmt, formatDate, escHtml } from './utils.js';
 import { scanReceiptsWithClaude } from './api/ocr.js';
 import { enrichTxnsWithClaude } from './api/enrich.js';
 import { generateAnalysisWithClaude } from './api/analysis.js';
+import { txnFingerprint, buildExistingTxnFingerprints } from './domain/dedup.js';
+import { getKrisFlyerYTD } from './domain/miles.js';
+import { previousMonthData, deltaBadge, buildSpendOverview } from './domain/budgets.js';
+import {
+  loadRecurring, saveRecurringList, loadRecurringApplied, saveRecurringApplied,
+  isCurrentOrFutureMonth,
+} from './domain/recurring.js';
 
 
 
@@ -438,67 +445,6 @@ async function enrichTransactionsWithAI() {
 }
 
 // ─── AI Spending Analysis ────────────────────────────────────────────────────
-function buildSpendOverview() {
-  const txns = currentTxns();
-  const totalSpent = txns.reduce((s, t) => s + t.amount, 0);
-  const totalBudget = Object.values(budgets).reduce((s, v) => s + (v || 0), 0);
-  const days = new Date(currentYear, currentMonth + 1, 0).getDate();
-  const today = new Date();
-  const dayOfMonth = (today.getFullYear() === currentYear && today.getMonth() === currentMonth)
-    ? today.getDate() : days;
-  const dailyAvg = dayOfMonth > 0 ? totalSpent / dayOfMonth : 0;
-  const projected = dailyAvg * days;
-
-  const perCategory = CATEGORIES.map(c => {
-    const spent = txns.filter(t => t.category === c.name).reduce((s, t) => s + t.amount, 0);
-    const bud = budgets[c.name] ?? c.budget;
-    return { category: c.name, spent: +spent.toFixed(2), budget: +bud, fixed: !!c.fixed };
-  }).filter(c => c.spent > 0 || c.budget > 0);
-
-  const perCard = CARDS.map(card => {
-    const cardTxns = txns.filter(t => t.card === card);
-    return {
-      card,
-      spent: +cardTxns.reduce((s, t) => s + t.amount, 0).toFixed(2),
-      txns: cardTxns.length,
-    };
-  }).filter(c => c.txns > 0);
-
-  const prev = previousMonthData();
-
-  // Miles tracker context (HSBC cap + UOB Lady's caps)
-  const milesContext = {
-    hsbc_cap_sgd: milesConfig.hsbc,
-    hsbc_qualifying_spent: +txns
-      .filter(t => t.card === 'HSBC Revolution')
-      .reduce((s, t) => s + t.amount, 0).toFixed(2),
-    uob_lady_dining_cap: milesConfig.uobLadyDining,
-    uob_lady_dining_spent: +txns
-      .filter(t => t.card === "UOB Lady's" && (milesConfig.diningCats || []).includes(t.category))
-      .reduce((s, t) => s + t.amount, 0).toFixed(2),
-    uob_lady_fashion_cap: milesConfig.uobLadyFashion,
-    uob_lady_fashion_spent: +txns
-      .filter(t => t.card === "UOB Lady's" && (milesConfig.fashionCats || []).includes(t.category))
-      .reduce((s, t) => s + t.amount, 0).toFixed(2),
-  };
-
-  return {
-    month: new Date(currentYear, currentMonth, 1).toLocaleString('en-SG', { month: 'long', year: 'numeric' }),
-    day_of_month: dayOfMonth,
-    days_in_month: days,
-    total_spent_sgd: +totalSpent.toFixed(2),
-    total_budget_sgd: +totalBudget.toFixed(2),
-    daily_average_sgd: +dailyAvg.toFixed(2),
-    projected_month_end_sgd: +projected.toFixed(2),
-    txn_count: txns.length,
-    per_category: perCategory,
-    per_card: perCard,
-    miles_tracker: milesContext,
-    prior_month: prev.hasData
-      ? { label: prev.label, total_spent_sgd: +prev.total.toFixed(2) }
-      : null,
-  };
-}
 
 // Build a combined data summary for one card — overall total + any miles
 // caps that apply. Used by the dashboard card carousel (formerly two
@@ -761,7 +707,7 @@ async function generateSpendAnalysis() {
 
   let text;
   try {
-    text = await generateAnalysisWithClaude({ apiKey: cfg.apiKey, overview: buildSpendOverview() });
+    text = await generateAnalysisWithClaude({ apiKey: cfg.apiKey, overview: buildSpendOverview({ year: currentYear, month: currentMonth, txns: currentTxns(), budgets, milesConfig, cards: CARDS }) });
   } catch (e) {
     body.classList.remove('loading');
     if (e.status) {
@@ -900,19 +846,6 @@ function migrateStoredCategories() {
 }
 
 // ─── Recurring Transactions ──────────────────────────────────────────────────
-function loadRecurring() {
-  try { return JSON.parse(localStorage.getItem(recurringKey()) || '[]'); } catch (e) { return []; }
-}
-function saveRecurringList(list) { localStorage.setItem(recurringKey(), JSON.stringify(list)); triggerSyncPush(); }
-function loadRecurringApplied() {
-  try { return JSON.parse(localStorage.getItem(recurringAppliedKey()) || '{}'); } catch (e) { return {}; }
-}
-function saveRecurringApplied(map) { localStorage.setItem(recurringAppliedKey(), JSON.stringify(map)); triggerSyncPush(); }
-
-function isCurrentOrFutureMonth(y, m) {
-  const today = new Date();
-  return (y > today.getFullYear()) || (y === today.getFullYear() && m >= today.getMonth());
-}
 
 function applyRecurringForMonth(y, m) {
   if (!isCurrentOrFutureMonth(y, m)) return;
@@ -1147,29 +1080,7 @@ function showPage(name, el) {
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
-function previousMonthData() {
-  let y = currentYear, m = currentMonth - 1;
-  if (m < 0) { m = 11; y--; }
-  const k = storageKey(y, m);
-  let prev = [];
-  try { prev = JSON.parse(localStorage.getItem(k) || '[]'); } catch (e) {}
-  const byCat = {};
-  CATEGORIES.forEach(c => byCat[c.name] = 0);
-  prev.forEach(t => { if (byCat[t.category] !== undefined) byCat[t.category] += t.amount; });
-  const total = prev.reduce((s, t) => s + t.amount, 0);
-  const label = new Date(y, m, 1).toLocaleString('en-SG', { month: 'short' });
-  return { total, byCategory: byCat, hasData: prev.length > 0, label };
-}
 
-function deltaBadge(curr, prev) {
-  if (prev === 0 && curr === 0) return '';
-  if (prev === 0) return `<span class="mom-badge mom-up">▲ new</span>`;
-  const delta = curr - prev;
-  if (Math.abs(delta) < 0.01) return `<span class="mom-badge mom-flat">▬ flat</span>`;
-  const pctChange = (delta / prev) * 100;
-  const up = delta > 0;
-  return `<span class="mom-badge ${up ? 'mom-up' : 'mom-down'}">${up ? '▲' : '▼'} ${up ? '+' : '−'}$${fmt(Math.abs(delta))} (${Math.abs(pctChange).toFixed(0)}%)</span>`;
-}
 
 function renderDashboard() {
   syncMonthPicker();
@@ -1179,7 +1090,7 @@ function renderDashboard() {
   const remaining = totalBudget - totalSpent;
   const pct = totalBudget > 0 ? totalSpent / totalBudget : 0;
 
-  const prev = previousMonthData();
+  const prev = previousMonthData({ year: currentYear, month: currentMonth });
 
   const days = new Date(currentYear, currentMonth + 1, 0).getDate();
   const today = new Date();
@@ -1344,16 +1255,6 @@ function renderDashboard() {
 }
 
 // ─── Miles Tracker ────────────────────────────────────────────────────────────
-function getKrisFlyerYTD() {
-  const year = new Date().getFullYear();
-  let total = 0;
-  for (let m = 0; m < 12; m++) {
-    const key = `txns_${year}_${String(m+1).padStart(2,'0')}`;
-    const raw = localStorage.getItem(key);
-    if (raw) JSON.parse(raw).forEach(t => { if (t.card === 'UOB KrisFlyer') total += t.amount; });
-  }
-  return total;
-}
 
 function milesPanel({ id, label, subLabel, badgeClass, card, spent, threshold, rate, note, isAnnual }) {
   const cardColor = CARD_COLOR[card] || 'var(--border)';
@@ -1750,29 +1651,7 @@ function onImportJsonInput() {
 // Category and MCC are deliberately excluded — they're post-hoc labels,
 // not part of a purchase's identity. Two entries for the same NTUC charge
 // labelled Groceries vs Shopping are still the same purchase.
-function txnFingerprint(t) {
-  const date = String(t.date || '').slice(0, 10);
-  const merchant = String(t.merchant || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  const card = String(t.card || '').trim();
-  const amt = parseFloat(t.amount);
-  const amtStr = isNaN(amt) ? '' : Math.abs(amt).toFixed(2);
-  return [date, merchant, card, amtStr].join('|');
-}
 
-// Walk every txns_* bucket in localStorage (not just the current month) so a
-// receipt re-scanned weeks later still flags as a dup.
-function buildExistingTxnFingerprints() {
-  const set = new Set();
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (!k || !k.startsWith('txns_')) continue;
-    let arr;
-    try { arr = JSON.parse(localStorage.getItem(k) || '[]'); } catch { continue; }
-    if (!Array.isArray(arr)) continue;
-    arr.forEach(t => set.add(txnFingerprint(t)));
-  }
-  return set;
-}
 
 // Render the per-entry review list whenever the textarea holds a valid JSON
 // array. Each row shows the entry's raw single-line JSON plus a × button to
