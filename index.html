@@ -318,6 +318,16 @@
   .import-result.ok { background: rgba(52,201,123,0.1); border: 1px solid rgba(52,201,123,0.3); color: var(--green); }
   .import-result.err { background: rgba(240,82,82,0.1); border: 1px solid rgba(240,82,82,0.3); color: var(--red); }
 
+  /* Per-entry review list (shown when importJson holds a valid JSON array) */
+  .import-entries { margin-bottom: 14px; }
+  .import-entries-header { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; }
+  .import-entries-header .hint { font-size: 11px; color: var(--small); text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .import-entries-list { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; padding-right: 4px; }
+  .import-entry-row { display: flex; align-items: center; gap: 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; }
+  .import-entry-json { flex: 1; min-width: 0; font-family: 'SF Mono', monospace; font-size: 11px; color: var(--text); white-space: nowrap; overflow-x: auto; line-height: 1.5; }
+  .import-entry-del { flex-shrink: 0; background: none; border: none; color: var(--small); cursor: pointer; font-size: 18px; padding: 2px 8px; border-radius: 4px; line-height: 1; }
+  .import-entry-del:hover { color: var(--red); background: rgba(240,82,82,0.1); }
+
   /* Settings budget table */
   .settings-table { width: 100%; border-collapse: collapse; }
   .settings-table th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
@@ -973,9 +983,10 @@
 &nbsp;&nbsp;{"date":"2026-05-18","merchant":"Uniqlo","category":"Fashion","card":"HSBC Revolution","amount":49.90}<br>
 ]
     </div>
+    <div class="import-entries" id="importEntries" style="display:none;"></div>
     <div class="form-row">
-      <label>Paste JSON here</label>
-      <textarea id="importJson" placeholder="[ ... ]" oninput="clearImportResult()"></textarea>
+      <label>Raw JSON (paste or edit)</label>
+      <textarea id="importJson" placeholder="[ ... ]" oninput="onImportJsonInput()"></textarea>
     </div>
     <div class="import-result" id="importResult"></div>
     <div class="modal-actions">
@@ -1758,6 +1769,7 @@ Return ONLY a JSON array, no prose, no markdown fences. Example:
 
   openImport();
   document.getElementById('importJson').value = cleaned;
+  renderImportEntries();
   toast(`Extracted from ${summary} — review then Validate / Import All`);
 }
 
@@ -3435,12 +3447,57 @@ function openImport() {
   document.getElementById('importResult').style.display = 'none';
   document.getElementById('importMonthLabel').textContent = monthLabel();
   document.getElementById('importModal').style.display = 'flex';
+  renderImportEntries();
   setTimeout(() => document.getElementById('importJson').focus(), 100);
 }
 
 function closeImport() { document.getElementById('importModal').style.display = 'none'; }
 
 function clearImportResult() { document.getElementById('importResult').style.display = 'none'; }
+
+function onImportJsonInput() {
+  clearImportResult();
+  renderImportEntries();
+}
+
+// Render the per-entry review list whenever the textarea holds a valid JSON
+// array. Each row shows the entry's raw single-line JSON plus a × button to
+// drop it before importing. Textarea remains the source of truth.
+function renderImportEntries() {
+  const container = document.getElementById('importEntries');
+  if (!container) return;
+  const raw = document.getElementById('importJson').value.trim();
+  if (!raw) { container.style.display = 'none'; container.innerHTML = ''; return; }
+  let arr;
+  try { arr = JSON.parse(raw); } catch { container.style.display = 'none'; container.innerHTML = ''; return; }
+  if (!Array.isArray(arr) || arr.length === 0) { container.style.display = 'none'; container.innerHTML = ''; return; }
+  container.style.display = 'block';
+  container.innerHTML = `
+    <div class="import-entries-header">
+      <span>${arr.length} entr${arr.length === 1 ? 'y' : 'ies'} — review &amp; drop unwanted</span>
+      <span class="hint">× removes one</span>
+    </div>
+    <div class="import-entries-list">
+      ${arr.map((entry, i) => `
+        <div class="import-entry-row">
+          <code class="import-entry-json">${escHtml(JSON.stringify(entry))}</code>
+          <button class="import-entry-del" onclick="dropImportEntry(${i})" title="Remove">×</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function dropImportEntry(i) {
+  const ta = document.getElementById('importJson');
+  let arr;
+  try { arr = JSON.parse(ta.value); } catch { return; }
+  if (!Array.isArray(arr) || i < 0 || i >= arr.length) return;
+  arr.splice(i, 1);
+  ta.value = arr.length ? JSON.stringify(arr, null, 2) : '';
+  clearImportResult();
+  renderImportEntries();
+}
 
 function parseImportJson() {
   const raw = document.getElementById('importJson').value.trim();
