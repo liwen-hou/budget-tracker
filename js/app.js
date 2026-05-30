@@ -1,3 +1,23 @@
+// ─── app.js — entry point + glue ────────────────────────────────────────────
+// After the phase 0–6 refactor this file owns:
+//   • module-level mutable state (currentYear, currentMonth, transactions,
+//     budgets, milesConfig, CARDS, CARD_COLOR, VALID_CARDS) — every other
+//     module reads this via context-injection closures wired at boot
+//   • the boot IIFE (resume session key OR show lock overlay)
+//   • bootApp() — runs after unlock; populates state from storage and renders
+//   • orchestration functions that mix DOM, state mutation, and module calls:
+//     handleScannedReceipt, enrichTransactionsWithAI, generateSpendAnalysis,
+//     manualSync, connectSyncFromUI, disconnectSyncFromUI, addTxnToStore's
+//     callers (renderAll, saveTransactions, deleteTxn, clearMonth)
+//   • the page renderers (renderDashboard, renderTransactions,
+//     renderSettings, renderMilesTracker) — still here pending a state.js
+//     module that would let ui/pages/*.js own them cleanly
+//   • the inline-handler compatibility shim (see end of file)
+//
+// Other concerns moved out: see js/{config,utils,crypto,storage,sync}.js,
+// js/api/{ocr,enrich,analysis}.js, js/domain/{dedup,miles,budgets,recurring}.js,
+// and js/ui/{lock,modals/*}.js.
+
 import {
   // Storage key naming
   storageKey, budgetKey, milesKey, recurringKey, recurringAppliedKey,
@@ -1474,10 +1494,22 @@ setAddTxnContext({
 });
 
 // ─── Inline-handler compatibility shim ───────────────────────────────────────
-// Phase 1 of the refactor — the 65 inline `onclick="…"` etc. attributes in
-// index.html still expect these to be globals on `window`. Module scope hides
-// them by default, so we re-export them here. Phase 6 will replace those
-// attributes with addEventListener, and this block can then be deleted.
+// Phase 1 of the refactor put 65 inline `onclick="…"` / `oninput="…"` /
+// `onkeydown="…"` attributes through this re-export so app.js could move to
+// `<script type="module">`. The shim is still in place after phases 2–6 —
+// migrating every inline attribute to addEventListener is a substantial
+// piece of work that didn't fit alongside the file extractions. It belongs
+// in a follow-up sweep that:
+//   1. removes onclick="…" / oninput="…" / onkeydown="…" from index.html
+//      and from JS template strings that emit dynamic rows (transactions
+//      list, import entries, recurring list, budget items, card tiles)
+//   2. wires the same logic via addEventListener at boot (static markup)
+//      and event delegation on parent containers (dynamic rows)
+//   3. deletes this Object.assign block
+// Cost of leaving it for now: 44 names leak onto window. Benefit: the app
+// works.
+//
+// Names are sorted alphabetically by category for easy diff during cleanup.
 Object.assign(window, {
   changeMonth, clearMonth, clearOcrKeyFromUI,
   closeAddCardModal, closeAddTxn, closeAnalysisModal, closeImport,
