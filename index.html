@@ -331,6 +331,9 @@
   .import-entry-json { flex: 1; min-width: 0; font-family: 'SF Mono', monospace; font-size: 11px; color: var(--text); white-space: nowrap; overflow-x: auto; line-height: 1.5; }
   .import-entry-del { flex-shrink: 0; background: none; border: none; color: var(--small); cursor: pointer; font-size: 18px; padding: 2px 8px; border-radius: 4px; line-height: 1; }
   .import-entry-del:hover { color: var(--red); background: rgba(240,82,82,0.1); }
+  .import-entry-row.is-duplicate { background: rgba(240,82,82,0.10); border-color: rgba(240,82,82,0.38); }
+  .import-entry-dup-badge { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; background: rgba(240,82,82,0.18); color: var(--red); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+  .import-entries-dup-count { color: var(--red); font-weight: 600; }
 
   /* Settings budget table */
   .settings-table { width: 100%; border-collapse: collapse; }
@@ -3464,9 +3467,35 @@ function onImportJsonInput() {
   renderImportEntries();
 }
 
+// Fingerprint = the set of fields that make a transaction "the same". Used
+// to flag exact duplicates in the import review list. Amount is normalised
+// to 2dp so 42 / 42.0 / 42.00 all collide; missing MCC normalises to "".
+function txnFingerprint(t) {
+  const amt = parseFloat(t.amount);
+  const amtStr = isNaN(amt) ? String(t.amount ?? '') : amt.toFixed(2);
+  const mcc = (t.mcc != null && String(t.mcc).trim() !== '') ? String(t.mcc).trim() : '';
+  return [t.date || '', t.merchant || '', t.category || '', t.card || '', amtStr, mcc].join('|');
+}
+
+// Walk every txns_* bucket in localStorage (not just the current month) so a
+// receipt re-scanned weeks later still flags as a dup.
+function buildExistingTxnFingerprints() {
+  const set = new Set();
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith('txns_')) continue;
+    let arr;
+    try { arr = JSON.parse(localStorage.getItem(k) || '[]'); } catch { continue; }
+    if (!Array.isArray(arr)) continue;
+    arr.forEach(t => set.add(txnFingerprint(t)));
+  }
+  return set;
+}
+
 // Render the per-entry review list whenever the textarea holds a valid JSON
 // array. Each row shows the entry's raw single-line JSON plus a × button to
-// drop it before importing. Textarea remains the source of truth.
+// drop it before importing. Rows whose fingerprint already exists in storage
+// get a red tint + "Duplicate" badge. Textarea remains the source of truth.
 function renderImportEntries() {
   const container = document.getElementById('importEntries');
   if (!container) return;
@@ -3475,16 +3504,22 @@ function renderImportEntries() {
   let arr;
   try { arr = JSON.parse(raw); } catch { container.style.display = 'none'; container.innerHTML = ''; return; }
   if (!Array.isArray(arr) || arr.length === 0) { container.style.display = 'none'; container.innerHTML = ''; return; }
+
+  const existing = buildExistingTxnFingerprints();
+  const flags = arr.map(e => existing.has(txnFingerprint(e)));
+  const dupCount = flags.filter(Boolean).length;
+
   container.style.display = 'block';
   container.innerHTML = `
     <div class="import-entries-header">
-      <span>${arr.length} entr${arr.length === 1 ? 'y' : 'ies'} — review &amp; drop unwanted</span>
+      <span>${arr.length} entr${arr.length === 1 ? 'y' : 'ies'} — review &amp; drop unwanted${dupCount ? ` · <span class="import-entries-dup-count">${dupCount} duplicate${dupCount === 1 ? '' : 's'} flagged</span>` : ''}</span>
       <span class="hint">× removes one</span>
     </div>
     <div class="import-entries-list">
       ${arr.map((entry, i) => `
-        <div class="import-entry-row">
+        <div class="import-entry-row${flags[i] ? ' is-duplicate' : ''}">
           <code class="import-entry-json">${escHtml(JSON.stringify(entry))}</code>
+          ${flags[i] ? '<span class="import-entry-dup-badge" title="An identical transaction already exists in your saved data">Duplicate</span>' : ''}
           <button class="import-entry-del" onclick="dropImportEntry(${i})" title="Remove">×</button>
         </div>
       `).join('')}
