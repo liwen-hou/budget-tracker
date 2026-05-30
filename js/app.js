@@ -20,6 +20,9 @@ import {
   CARD_BONUS_RULES, CARD_CLASS, VALID_CATS,
 } from './config.js';
 import { fmt, formatDate, escHtml } from './utils.js';
+import { scanReceiptsWithClaude } from './api/ocr.js';
+import { enrichTxnsWithClaude } from './api/enrich.js';
+import { generateAnalysisWithClaude } from './api/analysis.js';
 
 
 
@@ -206,9 +209,10 @@ document.addEventListener('visibilitychange', () => {
   document.body.classList.toggle('tab-hidden', document.hidden);
 });
 
-// ─── Receipt OCR (Claude Vision) ─────────────────────────────────────────────
-const OCR_MODEL = 'claude-haiku-4-5';
-const ANALYSIS_MODEL = 'claude-sonnet-4-6';
+// ─── Receipt OCR (orchestration) ─────────────────────────────────────────────
+// Pure Claude API calls live in js/api/{ocr,enrich,analysis}.js. The wrappers
+// here handle API-key check, toasts, modal opening, and applying the response
+// to in-memory state.
 
 // Bump on every release. The PWA shell on iOS caches the HTML and won't
 // pull updates on its own; checkForAppUpdate() fetches the live index.html,
@@ -318,20 +322,6 @@ function openScanReceipt() {
   document.getElementById('ocrFileInput').click();
 }
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result || '';
-      // strip "data:<mime>;base64," prefix
-      const comma = String(result).indexOf(',');
-      resolve(comma >= 0 ? String(result).slice(comma + 1) : String(result));
-    };
-    reader.onerror = () => reject(reader.error || new Error('File read failed'));
-    reader.readAsDataURL(file);
-  });
-}
-
 async function handleScannedReceipt(evt) {
   const files = Array.from(evt.target.files || []);
   evt.target.value = '';  // allow re-selecting the same files
@@ -348,77 +338,23 @@ async function handleScannedReceipt(evt) {
   ].filter(Boolean).join(' + ');
   toast(`Reading ${summary}…`);
 
-  let contentBlocks;
+  let cleaned;
   try {
-    contentBlocks = await Promise.all(files.map(async f => {
-      const data = await fileToBase64(f);
-      if (f.type === 'application/pdf') {
-        return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } };
-      }
-      return { type: 'image', source: { type: 'base64', media_type: f.type || 'image/jpeg', data } };
-    }));
-  } catch (e) {
-    toast('Could not read one of the files');
-    return;
-  }
-
-  const today = new Date().toISOString().split('T')[0];
-  const catList = CATEGORIES.map(c => c.name).join(', ');
-  const cardList = CARDS.join(', ');
-  const sourceLabel = pdfCount && imgCount ? 'attached receipts, statements, and PDFs'
-                    : pdfCount > 1 ? `${pdfCount} attached bank statement PDFs`
-                    : pdfCount === 1 ? 'this bank statement PDF'
-                    : imgCount > 1 ? `${imgCount} attached receipt or statement images`
-                    : 'this receipt or statement image';
-  const multi = files.length > 1 || pdfCount >= 1;
-  const prompt = `Extract every transaction visible in ${sourceLabel}.
-
-${multi ? 'Merge transactions from every page and file into a single combined JSON array, in chronological order. Skip non-transaction rows (opening balance, closing balance, totals, fees summary headers, payments to the card if this is a credit card statement). ' : ''}For each transaction return:
-- date: YYYY-MM-DD (if year not visible, infer from the statement period; if no date at all, use ${today})
-- merchant: short description (clean up redundant codes like reference numbers, location IDs)
-- category: choose the closest match from this list — ${catList}
-- card: choose from — ${cardList}. If a bank statement makes the source card obvious (e.g. "DBS Vantage Statement"), use it. Otherwise "Cash".
-- amount: a positive number in SGD (use the debit/charge amount, not credit)
-- mcc: 4-digit Merchant Category Code IF visible on the statement (e.g. "5814"). Omit the field entirely if not shown.
-
-Return ONLY a JSON array, no prose, no markdown fences. Example:
-[{"date":"${today}","merchant":"NTUC","category":"Groceries","card":"DBS Vantage","amount":42.50,"mcc":"5411"}]`;
-
-  let res;
-  try {
-    res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': cfg.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: OCR_MODEL,
-        // Bank statements can list 50–100+ transactions per file, so leave room.
-        max_tokens: pdfCount > 0 ? 16384 : 4096,
-        messages: [{
-          role: 'user',
-          content: [...contentBlocks, { type: 'text', text: prompt }],
-        }],
-      }),
+    cleaned = await scanReceiptsWithClaude({
+      apiKey: cfg.apiKey,
+      files,
+      categoryNames: CATEGORIES.map(c => c.name),
+      cardNames: CARDS,
     });
   } catch (e) {
-    toast('Network error calling Claude');
+    if (e.status) {
+      toast(`Claude API ${e.status}`);
+      console.warn('OCR API error:', e.body);
+    } else {
+      toast(e.message || 'Network error calling Claude');
+    }
     return;
   }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    toast(`Claude API ${res.status}`);
-    console.warn('OCR API error:', text);
-    return;
-  }
-
-  const body = await res.json();
-  const text = (body?.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim();
-  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
 
   openImport();
   document.getElementById('importJson').value = cleaned;
@@ -449,101 +385,28 @@ async function enrichTransactionsWithAI() {
 
   toast(`Asking Claude to review ${txns.length} transactions…`);
 
-  const catList = CATEGORIES.map(c => c.name).join(', ');
-  // Only send fields needed for inference; keep IDs for patching
-  const payload = txns.map(t => ({
-    id: t.id,
-    date: t.date,
-    merchant: t.merchant,
-    card: t.card,
-    amount: t.amount,
-    category: t.category,
-    mcc: t.mcc || null,
-  }));
-
-  const prompt = `You are reviewing a Singapore credit-card transaction list. Fill in missing MCCs and fix obviously-wrong categories. Be confident — most Singapore merchants are recognisable even with the noisy prefixes banks add.
-
-STRIP MERCHANT PREFIXES before classifying. Examples of the same merchant appearing in different forms:
-- "GRAB*SG_XXXXXX", "Grab Rides", "GRAB SINGAPORE", "GRAB*A1B2C3D4" → Grab Rides (taxi)
-- "GRABFOOD*XYZ", "GrabFood SG", "Foodpanda *MERCHANT" → food delivery
-- "POSB AUTO-PAY SINGTEL", "SINGTEL MOBILE PMT" → Singtel
-- "PAYPAL*ACME", "STRIPE*ACME" → look at the merchant after the *
-
-SG MERCHANT CHEAT SHEET (use these MCCs unless statement says otherwise):
-- Grab Rides / Gojek / ComfortDelGro / TADA → 4121 → Transport
-- GrabFood / Foodpanda / Deliveroo → 5814 → Food Delivery
-- GrabMart / RedMart → 5411 → Groceries
-- NTUC / FairPrice / Sheng Siong / Cold Storage / Giant / Don Don Donki → 5411 → Groceries
-- Singtel / StarHub / M1 / Circles.Life → 4812 → Bills & Subscriptions
-- SP Group / Senoko / City Energy → 4900 → Bills & Subscriptions
-- Netflix / Spotify / Apple iCloud / Google One / ChatGPT / Disney+ → 5817 → Bills & Subscriptions
-- SQ / Singapore Airlines / Scoot / Jetstar / AirAsia → 3000-3299 (airlines) → Travel
-- Klook / Trip.com / Agoda / Booking.com / Expedia / Airbnb → 4722 → Travel
-- Uniqlo / Zara / H&M / Cotton On / Charles & Keith / Pedro → 5651 / 5621 → Fashion
-- Sephora / Watsons / Guardian / Sephora.sg → 5977 → Shopping & Beauty
-- Shopee / Lazada / Taobao / Amazon → 5399 → varies (Shopping & Beauty / Fashion / Other based on what's typically bought)
-- Apple / Best Denki / Harvey Norman → 5732 → Other
-- Pure Yoga / Anytime Fitness / Ally Health / ClassPass → 7991 / 7298 → Health & Fitness
-- Mount Elizabeth / Raffles Medical / Q&M / Polyclinic → 8062 / 8021 → Medical & Dental
-- Restaurants, hawker stalls, bars, cafes, Starbucks, Coffee Bean → 5812 / 5814 → Dining Out
-- POSB / DBS / OCBC / UOB instalments / repayments / loans → 6012 → Debt & Instalments
-
-Rules:
-1. Always fill in MCC when you're confident (the cheat sheet covers most cases). Only omit MCC when the merchant is genuinely unrecognisable.
-2. If the current category is clearly wrong given the merchant (e.g. Grab Rides categorised as Food Delivery), fix it using a category from the valid list. If the existing category is plausible, leave it.
-3. Use ONLY these exact category strings: ${catList}
-
-Return ONLY a JSON array of patches — one per txn that needs updating. Each patch has the original "id" plus only the fields that should change. Example:
-[{"id":"abc","mcc":"4121","category":"Transport"},{"id":"def","mcc":"5411"}]
-
-No markdown fences, no prose, no commentary.
-
-Transactions:
-${JSON.stringify(payload, null, 2)}`;
-
-  let res;
+  let patches;
   try {
-    res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': cfg.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        // Sonnet handles merchant-name disambiguation and SG context far
-        // better than Haiku — the previous version was missing obvious
-        // Grab / NTUC / Singtel cases because Haiku played it too safe.
-        model: ANALYSIS_MODEL,
-        max_tokens: 8192,
-        messages: [{ role: 'user', content: prompt }],
-      }),
+    patches = await enrichTxnsWithClaude({
+      apiKey: cfg.apiKey,
+      txns,
+      categoryNames: CATEGORIES.map(c => c.name),
     });
   } catch (e) {
-    toast('Network error calling Claude');
+    if (e.status) {
+      toast(`Claude API ${e.status}`);
+      console.warn('Enrich error:', e.body);
+    } else if (e.message?.startsWith('Claude returned non-JSON')) {
+      toast('Claude returned non-JSON; see console');
+      console.warn('Enrich response:', e.body);
+    } else if (e.message?.startsWith('Unexpected response shape')) {
+      toast('Unexpected response shape; see console');
+      console.warn(e.body);
+    } else {
+      toast(e.message || 'Network error calling Claude');
+    }
     return;
   }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    toast(`Claude API ${res.status}`);
-    console.warn('Enrich error:', text);
-    return;
-  }
-
-  const body = await res.json();
-  const text = (body?.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim();
-  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-
-  let patches;
-  try { patches = JSON.parse(cleaned); }
-  catch (e) {
-    toast('Claude returned non-JSON; see console');
-    console.warn('Enrich response:', cleaned);
-    return;
-  }
-  if (!Array.isArray(patches)) { toast('Unexpected response shape; see console'); console.warn(patches); return; }
 
   const key = storageKey(currentYear, currentMonth);
   const list = transactions[key] || [];
@@ -896,56 +759,24 @@ async function generateSpendAnalysis() {
   body.classList.add('loading');
   body.textContent = 'Asking Claude…';
 
-  const overview = buildSpendOverview();
-  const prompt = `You are a sharp personal finance coach. Look at this user's current-month dashboard data and write ONE paragraph (max 110 words) that:
-- States the headline: are they on/under/over pace? quantify briefly
-- Calls out the 1-2 categories driving the pace (good or bad)
-- Notes any miles-card cap they should chase or avoid wasting
-- Ends with one concrete, specific action for the rest of the month
-
-Be direct and Singaporean-pragmatic. Use SGD. No bullet points, no preamble, no markdown — just the paragraph.
-
-Dashboard data (JSON):
-${JSON.stringify(overview, null, 2)}`;
-
-  let res;
+  let text;
   try {
-    res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': cfg.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: ANALYSIS_MODEL,
-        max_tokens: 400,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
+    text = await generateAnalysisWithClaude({ apiKey: cfg.apiKey, overview: buildSpendOverview() });
   } catch (e) {
     body.classList.remove('loading');
-    body.textContent = '⚠️ Network error calling Claude';
+    if (e.status) {
+      body.textContent = `⚠️ Claude API ${e.status}`;
+      console.warn('Analysis API error:', e.body);
+    } else {
+      body.textContent = '⚠️ ' + (e.message || 'Network error calling Claude');
+    }
     btn.disabled = false;
     btn.textContent = 'Try again';
     return;
   }
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    body.classList.remove('loading');
-    body.textContent = `⚠️ Claude API ${res.status}`;
-    console.warn('Analysis API error:', text);
-    btn.disabled = false;
-    btn.textContent = 'Try again';
-    return;
-  }
-
-  const json = await res.json();
-  const text = (json?.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim();
   body.classList.remove('loading');
-  body.innerHTML = `<div>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+  body.innerHTML = `<div>${escHtml(text)}</div>
     <div class="analysis-meta">
       <span>${new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' })}</span>
       <a onclick="generateSpendAnalysis()">↻ Refresh</a>
