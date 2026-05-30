@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffe4ec"/>
+      <stop offset="38%" stop-color="#ece1ff"/>
+      <stop offset="72%" stop-color="#d8eaff"/>
+      <stop offset="100%" stop-color="#daf5e8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="180" ry="180" fill="url(#bg)"/>
+  <g fill="#ffffff">
+    <!-- Main sparkle: two crossed thin diamonds, centered -->
+    <polygon points="512,256 604,512 512,768 420,512"/>
+    <polygon points="256,512 512,420 768,512 512,604"/>
+    <!-- Top-right small sparkle -->
+    <polygon points="757,205 790,287 757,369 724,287" opacity="0.92"/>
+    <polygon points="675,287 757,254 839,287 757,320" opacity="0.92"/>
+    <!-- Bottom-left small sparkle -->
+    <polygon points="266,712 293,778 266,845 240,778" opacity="0.85"/>
+    <polygon points="200,778 266,751 333,778 266,805" opacity="0.85"/>
+  </g>
+</svg>
