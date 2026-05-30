@@ -9,14 +9,49 @@
 <title>Liwen — Budget Tracker</title>
 <style>
   :root {
-    --bg: #0f1117; --surface: #1a1d27; --surface2: #222536; --surface3: #2a2e42;
-    --border: #2e3248; --accent: #4f8ef7; --accent2: #7c5cbf;
-    --green: #34c97b; --red: #f05252; --orange: #f59e0b; --yellow: #fbbf24;
-    --text: #e8eaf0; --muted: #7b809a; --small: #555a75;
+    /* Soft pastel light palette — opaque cards over a tinted gradient backdrop */
+    --bg: #f6efff;
+    --bg-grad-1: #ffe4ec;  /* blush */
+    --bg-grad-2: #ece1ff;  /* lavender */
+    --bg-grad-3: #d8eaff;  /* sky */
+    --bg-grad-4: #daf5e8;  /* mint */
+    --surface:  #ffffff;
+    --surface2: #f4f0fa;
+    --surface3: #e8e2f4;
+    --border:   #e2d8ec;
+    --accent:   #6b7cf0;
+    --accent2:  #a777e3;
+    --green:    #1faa61;
+    --red:      #d83f3f;
+    --orange:   #d97706;
+    --yellow:   #c98c00;
+    --text:  #2c2f44;
+    --muted: #6b6f8a;
+    --small: #9a9eb8;
     --radius: 10px; --radius-sm: 6px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    position: relative;
+  }
+  /* Fixed pastel gradient sits behind everything (iOS-safe vs background-attachment) */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(135deg,
+      var(--bg-grad-1) 0%,
+      var(--bg-grad-2) 38%,
+      var(--bg-grad-3) 72%,
+      var(--bg-grad-4) 100%);
+    z-index: -1;
+    pointer-events: none;
+  }
 
   /* Layout */
   .app { display: flex; min-height: 100vh; }
@@ -37,7 +72,7 @@
   .month-nav { display: flex; align-items: center; gap: 12px; }
   .month-label { font-size: 20px; font-weight: 700; color: var(--text); min-width: 160px; text-align: center; }
   /* Month picker — looks like a heading, but click → native month/year picker */
-  .month-picker { font-size: 20px; font-weight: 700; color: var(--text); background: transparent; border: 1px solid transparent; padding: 4px 8px; border-radius: 6px; min-width: 160px; text-align: center; cursor: pointer; font-family: inherit; color-scheme: dark; }
+  .month-picker { font-size: 20px; font-weight: 700; color: var(--text); background: transparent; border: 1px solid transparent; padding: 4px 8px; border-radius: 6px; min-width: 160px; text-align: center; cursor: pointer; font-family: inherit; color-scheme: light; }
   .month-picker:hover, .month-picker:focus { border-color: var(--border); background: var(--surface); outline: none; }
   /* Hide top action buttons when on the Budgets/Settings page */
   .main[data-active="settings"] #topActions { display: none; }
@@ -215,7 +250,7 @@
   .mom-badge { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 11px; letter-spacing: 0.2px; }
   .mom-up   { background: rgba(240,82,82,0.15);  color: var(--red); }
   .mom-down { background: rgba(52,201,123,0.15); color: var(--green); }
-  .mom-flat { background: rgba(255,255,255,0.06); color: var(--muted); }
+  .mom-flat { background: rgba(0,0,0,0.05); color: var(--muted); }
 
   /* Transactions header — total left, action right */
   .txn-header-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -248,14 +283,14 @@
   .txn-merchant { font-size: 13px; font-weight: 500; }
   .txn-cat-badge { font-size: 11px; padding: 3px 8px; border-radius: 20px; background: var(--surface3); color: var(--muted); display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .txn-card-badge { font-size: 11px; padding: 2px 7px; border-radius: 20px; font-weight: 600; }
-  .card-dbs { background: rgba(79,142,247,0.15); color: #7ab3f9; }
-  .card-uob-lady { background: rgba(52,201,123,0.15); color: #34c97b; }
-  .card-uob-kf { background: rgba(124,92,191,0.15); color: #9b7de8; }
-  .card-hsbc { background: rgba(240,82,82,0.15); color: #f87171; }
-  .card-cash { background: rgba(245,158,11,0.15); color: var(--orange); }
+  .card-dbs { background: rgba(79,142,247,0.18); color: #3b6bd9; }
+  .card-uob-lady { background: rgba(52,201,123,0.18); color: #1f9b5e; }
+  .card-uob-kf { background: rgba(124,92,191,0.18); color: #6543b3; }
+  .card-hsbc { background: rgba(240,82,82,0.18); color: #c93d3d; }
+  .card-cash { background: rgba(245,158,11,0.18); color: #b46a00; }
   .txn-amount { font-size: 13px; font-weight: 600; text-align: right; }
   .txn-subline { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
-  .txn-mcc-badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--muted); font-family: 'SF Mono', monospace; letter-spacing: 0.2px; }
+  .txn-mcc-badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(0,0,0,0.04); border: 1px solid var(--border); color: var(--muted); font-family: 'SF Mono', monospace; letter-spacing: 0.2px; }
   .txn-miss-badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.2px; cursor: help; }
   .txn-miss-no-earn   { background: rgba(240,82,82,0.15);  color: var(--red); border: 1px solid rgba(240,82,82,0.3); }
   .txn-miss-base-only { background: rgba(255,170,40,0.12); color: var(--orange); border: 1px solid rgba(255,170,40,0.3); }
@@ -265,7 +300,7 @@
   .btn-edit:hover { color: var(--accent); background: rgba(80,140,255,0.1); }
 
   /* Modal */
-  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; display: flex; align-items: center; justify-content: center; }
+  .overlay { position: fixed; inset: 0; background: rgba(46,38,75,0.38); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 100; display: flex; align-items: center; justify-content: center; }
   .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px; width: 440px; max-width: 95vw; }
   .modal-wide { width: 600px; }
   .modal h3 { font-size: 17px; font-weight: 700; margin-bottom: 20px; }
@@ -342,7 +377,7 @@
     transition: color 0.15s, background 0.15s;
     z-index: 2;
   }
-  .card-rules-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+  .card-rules-btn:hover { color: var(--text); background: rgba(0,0,0,0.05); }
   .card-stat.has-back .card-front { cursor: pointer; position: relative; }
 
   /* Update banner */
@@ -601,7 +636,7 @@
   }
 
   /* ─── Unlock / setup overlay ─── */
-  .lock-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 9999; display: none; align-items: center; justify-content: center; padding: 24px; }
+  .lock-overlay { position: fixed; inset: 0; background: linear-gradient(135deg, var(--bg-grad-1) 0%, var(--bg-grad-2) 38%, var(--bg-grad-3) 72%, var(--bg-grad-4) 100%); z-index: 9999; display: none; align-items: center; justify-content: center; padding: 24px; }
   .lock-overlay.show { display: flex; }
   .lock-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px 24px; max-width: 380px; width: 100%; }
   .lock-card h2 { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
