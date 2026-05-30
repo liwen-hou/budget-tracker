@@ -3,6 +3,7 @@
 
 import { CATEGORIES } from '../../config.js';
 import { fmt, escHtml } from '../../utils.js';
+import { state } from '../../state.js';
 import {
   loadRecurring, saveRecurringList, loadRecurringApplied, saveRecurringApplied,
   isCurrentOrFutureMonth,
@@ -11,8 +12,6 @@ import {
 let editingRecurringId = null;
 
 let _ctx = {
-  getCurrentYear: () => 0,
-  getCurrentMonth: () => 0,
   monthLabel: () => '',
   applyRecurringForMonth: () => {},
   renderAll: () => {},
@@ -82,7 +81,7 @@ export function saveRecurring() {
   };
   list.push(newRec);
   saveRecurringList(list);
-  const y = _ctx.getCurrentYear(), m = _ctx.getCurrentMonth();
+  const y = state.currentYear, m = state.currentMonth;
   _ctx.applyRecurringForMonth(y, m);
   closeRecurringModal();
   renderRecurringList();

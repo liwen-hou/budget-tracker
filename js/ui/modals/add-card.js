@@ -1,7 +1,8 @@
 // Add-card modal — small modal for naming a new custom card.
 
+import { state } from '../../state.js';
+
 let _ctx = {
-  getCards: () => [],
   loadCustomCards: () => [],
   saveCustomCards: () => {},
   nextCustomColor: () => '#666',
@@ -25,7 +26,7 @@ export function submitAddCard() {
   const name = document.getElementById('newCardName').value.trim();
   const errEl = document.getElementById('addCardErr');
   if (!name) { errEl.textContent = 'Card name is required'; return; }
-  if (_ctx.getCards().some(c => c.toLowerCase() === name.toLowerCase())) {
+  if (state.cards.some(c => c.toLowerCase() === name.toLowerCase())) {
     errEl.textContent = 'A card with that name already exists'; return;
   }
   const custom = _ctx.loadCustomCards();

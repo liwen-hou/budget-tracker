@@ -4,14 +4,12 @@
 
 import { CATEGORIES, MCC_LOOKUP } from '../../config.js';
 import { fmt } from '../../utils.js';
+import { state } from '../../state.js';
 import { storageKey } from '../../storage.js';
 
 let editingTxnId = null;
 
 let _ctx = {
-  getCurrentYear: () => 0,
-  getCurrentMonth: () => 0,
-  getTransactions: () => ({}),
   saveTransactions: () => {},
   renderAll: () => {},
   toast: () => {},
@@ -45,7 +43,7 @@ export function openAddTxn() {
   document.getElementById('txnModalTitle').textContent = 'Add Transaction';
   document.getElementById('txnSaveBtn').textContent = 'Add Transaction';
 
-  const y = _ctx.getCurrentYear(), m = _ctx.getCurrentMonth();
+  const y = state.currentYear, m = state.currentMonth;
   const now = new Date();
   const isCurrentMonth = now.getFullYear() === y && now.getMonth() === m;
   document.getElementById('txnDate').value = isCurrentMonth
@@ -63,8 +61,8 @@ export function openAddTxn() {
 }
 
 export function openEditTxn(id) {
-  const key = storageKey(_ctx.getCurrentYear(), _ctx.getCurrentMonth());
-  const t = (_ctx.getTransactions()[key] || []).find(x => x.id === id);
+  const key = storageKey(state.currentYear, state.currentMonth);
+  const t = (state.transactions[key] || []).find(x => x.id === id);
   if (!t) { _ctx.toast('Transaction not found'); return; }
 
   editingTxnId = id;
@@ -101,9 +99,8 @@ export function saveTxn() {
   const mcc = mccRaw || undefined;
 
   if (editingTxnId) {
-    const transactions = _ctx.getTransactions();
-    const key = storageKey(_ctx.getCurrentYear(), _ctx.getCurrentMonth());
-    const list = transactions[key] || [];
+    const key = storageKey(state.currentYear, state.currentMonth);
+    const list = state.transactions[key] || [];
     const idx = list.findIndex(x => x.id === editingTxnId);
     if (idx < 0) { _ctx.toast('Transaction not found'); return; }
     list[idx] = { ...list[idx], date, merchant, category, card, amount, mcc };
@@ -121,11 +118,10 @@ export function saveTxn() {
 }
 
 export function addTxnToStore(t) {
-  const transactions = _ctx.getTransactions();
-  const key = storageKey(_ctx.getCurrentYear(), _ctx.getCurrentMonth());
-  if (!transactions[key]) transactions[key] = [];
+  const key = storageKey(state.currentYear, state.currentMonth);
+  if (!state.transactions[key]) state.transactions[key] = [];
   const row = { id: Date.now().toString() + Math.random().toString(36).slice(2), date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: t.amount };
   if (t.mcc) row.mcc = String(t.mcc);
-  transactions[key].push(row);
+  state.transactions[key].push(row);
   _ctx.saveTransactions();
 }

@@ -1,7 +1,7 @@
 // ─── app.js — entry point + glue ────────────────────────────────────────────
 // After the phase 0–6 refactor this file owns:
-//   • module-level mutable state (currentYear, currentMonth, transactions,
-//     budgets, milesConfig, CARDS, CARD_COLOR, VALID_CARDS) — every other
+//   • module-level mutable state (state.currentYear, state.currentMonth, state.transactions,
+//     state.budgets, state.milesConfig, state.cards, state.cardColor, state.validCards) — every other
 //     module reads this via context-injection closures wired at boot
 //   • the boot IIFE (resume session key OR show lock overlay)
 //   • bootApp() — runs after unlock; populates state from storage and renders
@@ -14,7 +14,7 @@
 //     module that would let ui/pages/*.js own them cleanly
 //   • the inline-handler compatibility shim (see end of file)
 //
-// Other concerns moved out: see js/{config,utils,crypto,storage,sync}.js,
+// Other concerns moved out: see js/{config,state,utils,crypto,storage,sync}.js,
 // js/api/{ocr,enrich,analysis}.js, js/domain/{dedup,miles,budgets,recurring}.js,
 // and js/ui/{lock,modals/*}.js.
 
@@ -39,6 +39,7 @@ import {
   MCC_LOOKUP, mccDisplayName,
   CARD_BONUS_RULES, CARD_CLASS, VALID_CATS,
 } from './config.js';
+import { state } from './state.js';
 import { fmt, formatDate, escHtml } from './utils.js';
 import { scanReceiptsWithClaude } from './api/ocr.js';
 import { enrichTxnsWithClaude } from './api/enrich.js';
@@ -67,8 +68,6 @@ import {
   populateTxnCategorySelect, onMccInputChange, setAddTxnContext,
 } from './ui/modals/add-txn.js';
 
-let CARDS       = [...DEFAULT_CARDS];
-let CARD_COLOR  = {...DEFAULT_CARD_COLOR};
 
 
 
@@ -90,7 +89,7 @@ function getMissedBonus(t) {
   }
 
   if (rules.type === "category-bonus") {
-    const bonusCats = new Set([...(milesConfig.fashionCats || []), ...(milesConfig.diningCats || [])]);
+    const bonusCats = new Set([...(state.milesConfig.fashionCats || []), ...(state.milesConfig.diningCats || [])]);
     if (bonusCats.size === 0) return null;  // not configured, don't flag
     if (!bonusCats.has(t.category)) {
       return {
@@ -103,7 +102,6 @@ function getMissedBonus(t) {
   }
   return null;
 }
-let VALID_CARDS = new Set(CARDS);
 
 function loadCustomCards() {
   try { return JSON.parse(localStorage.getItem(cardsKey()) || '[]'); } catch (e) { return []; }
@@ -118,7 +116,7 @@ function loadMilesOrder() {
 }
 function saveMilesOrder(order) { localStorage.setItem(milesOrderKey(), JSON.stringify(order)); triggerSyncPush(); }
 function nextCustomColor() {
-  const used = Object.values(CARD_COLOR);
+  const used = Object.values(state.cardColor);
   return CUSTOM_CARD_PALETTE.find(c => !used.includes(c)) || CUSTOM_CARD_PALETTE[0];
 }
 function refreshCards() {
@@ -131,49 +129,38 @@ function refreshCards() {
   const ordered = [];
   saved.forEach(n => { if (universe.includes(n)) ordered.push(n); });
   universe.forEach(n => { if (!ordered.includes(n)) ordered.push(n); });
-  CARDS = ordered;
+  state.cards = ordered;
   // Colour map (defaults override saved custom colours so brand colours stay stable)
-  CARD_COLOR = {...DEFAULT_CARD_COLOR};
-  custom.forEach(c => { if (c?.name && !CARD_COLOR[c.name]) CARD_COLOR[c.name] = c.color || nextCustomColor(); });
-  VALID_CARDS = new Set(CARDS);
+  state.cardColor = {...DEFAULT_CARD_COLOR};
+  custom.forEach(c => { if (c?.name && !state.cardColor[c.name]) state.cardColor[c.name] = c.color || nextCustomColor(); });
+  state.validCards = new Set(state.cards);
 }
 // Inline-style fallback for badges of cards that don't have a preset CSS class
 // (i.e. user-added custom cards). Returns empty string for built-in cards.
 function cardBadgeStyle(card) {
   if (CARD_CLASS[card]) return '';
-  const color = CARD_COLOR[card] || '#7b809a';
+  const color = state.cardColor[card] || '#7b809a';
   return `style="background: color-mix(in srgb, ${color} 18%, transparent); color: ${color};"`;
 }
 function populateCardSelects() {
-  const opts = CARDS.map(c => `<option value="${c}">${c}</option>`).join('');
+  const opts = state.cards.map(c => `<option value="${c}">${c}</option>`).join('');
   ['txnCard', 'recCard'].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
     const cur = sel.value;
     sel.innerHTML = opts;
-    if (cur && CARDS.includes(cur)) sel.value = cur;
+    if (cur && state.cards.includes(cur)) sel.value = cur;
   });
   const fil = document.getElementById('txnCardFilter');
   if (fil) {
     const cur = fil.value;
     fil.innerHTML = '<option value="">All cards</option>' + opts;
-    if (cur === '' || CARDS.includes(cur)) fil.value = cur;
+    if (cur === '' || state.cards.includes(cur)) fil.value = cur;
   }
 }
 
 
 // State
-let currentYear, currentMonth;
-let budgets = {};
-let transactions = {};
-let milesConfig = {
-  hsbc: 1000,
-  uobLadyFashion: 750,
-  uobLadyDining: 750,
-  kfAnnual: 1000,
-  fashionCats: ['Fashion'],
-  diningCats: ['Dining Out'],
-};
 
 
 
@@ -336,7 +323,7 @@ async function handleScannedReceipt(evt) {
       apiKey: cfg.apiKey,
       files,
       categoryNames: CATEGORIES.map(c => c.name),
-      cardNames: CARDS,
+      cardNames: state.cards,
     });
   } catch (e) {
     if (e.status) {
@@ -363,7 +350,7 @@ async function enrichTransactionsWithAI() {
   }
 
   const txns = currentTxns();
-  if (txns.length === 0) { toast('No transactions in this month to enrich'); return; }
+  if (txns.length === 0) { toast('No state.transactions in this month to enrich'); return; }
 
   const missingMcc = txns.filter(t => !t.mcc).length;
   const ok = confirm(
@@ -375,7 +362,7 @@ async function enrichTransactionsWithAI() {
   );
   if (!ok) return;
 
-  toast(`Asking Claude to review ${txns.length} transactions…`);
+  toast(`Asking Claude to review ${txns.length} state.transactions…`);
 
   let patches;
   try {
@@ -400,8 +387,8 @@ async function enrichTransactionsWithAI() {
     return;
   }
 
-  const key = storageKey(currentYear, currentMonth);
-  const list = transactions[key] || [];
+  const key = storageKey(state.currentYear, state.currentMonth);
+  const list = state.transactions[key] || [];
   const validCats = new Set(CATEGORIES.map(c => c.name));
   let mccAdded = 0, mccChanged = 0, catChanged = 0;
   patches.forEach(p => {
@@ -445,30 +432,30 @@ function cardData(card, txns, cardTotals) {
       label: 'Monthly bonus cap',
       shortLabel: 'Monthly cap',
       spent: total,
-      cap: milesConfig.hsbc,
+      cap: state.milesConfig.hsbc,
       rate: '4 mpd',
       note: 'Counts contactless + online spend (dining, shopping, transport, subscriptions). Excludes SimplyGo, fast-food delivery, and OTAs.',
     });
   } else if (card === "UOB Lady's") {
-    const fashionSet = new Set(milesConfig.fashionCats || []);
-    const diningSet  = new Set(milesConfig.diningCats || []);
+    const fashionSet = new Set(state.milesConfig.fashionCats || []);
+    const diningSet  = new Set(state.milesConfig.diningCats || []);
     const fashionSpent = cardTxns.filter(t => fashionSet.has(t.category)).reduce((s,t)=>s+t.amount, 0);
     const diningSpent  = cardTxns.filter(t => diningSet.has(t.category)).reduce((s,t)=>s+t.amount, 0);
     miles.push({
       label: 'Fashion bonus',
       shortLabel: 'Fashion',
       spent: fashionSpent,
-      cap: milesConfig.uobLadyFashion,
+      cap: state.milesConfig.uobLadyFashion,
       rate: '4 mpd',
-      note: 'Counts UOB Lady\'s spend in: ' + (milesConfig.fashionCats || []).join(', '),
+      note: 'Counts UOB Lady\'s spend in: ' + (state.milesConfig.fashionCats || []).join(', '),
     });
     miles.push({
       label: 'Dining bonus',
       shortLabel: 'Dining',
       spent: diningSpent,
-      cap: milesConfig.uobLadyDining,
+      cap: state.milesConfig.uobLadyDining,
       rate: '4 mpd',
-      note: 'Counts UOB Lady\'s spend in: ' + (milesConfig.diningCats || []).join(', '),
+      note: 'Counts UOB Lady\'s spend in: ' + (state.milesConfig.diningCats || []).join(', '),
     });
   } else if (card === 'UOB KrisFlyer') {
     const ytd = getKrisFlyerYTD();
@@ -476,9 +463,9 @@ function cardData(card, txns, cardTotals) {
       label: 'Annual SIA Group min',
       shortLabel: 'Annual SIA',
       spent: ytd,
-      cap: milesConfig.kfAnnual,
+      cap: state.milesConfig.kfAnnual,
       rate: '3 mpd on SQ/Scoot',
-      note: 'Tracks all UOB KrisFlyer card spend Jan–Dec. Must hit $' + fmt(milesConfig.kfAnnual) + '/year to unlock the 2.4 mpd bonus tier on other spend.',
+      note: 'Tracks all UOB KrisFlyer card spend Jan–Dec. Must hit $' + fmt(state.milesConfig.kfAnnual) + '/year to unlock the 2.4 mpd bonus tier on other spend.',
     });
   }
   // DBS Vantage, Cash, custom cards — no miles tracking → no flip.
@@ -663,7 +650,7 @@ async function generateSpendAnalysis() {
 
   let text;
   try {
-    text = await generateAnalysisWithClaude({ apiKey: cfg.apiKey, overview: buildSpendOverview({ year: currentYear, month: currentMonth, txns: currentTxns(), budgets, milesConfig, cards: CARDS }) });
+    text = await generateAnalysisWithClaude({ apiKey: cfg.apiKey, overview: buildSpendOverview({ year: state.currentYear, month: state.currentMonth, txns: currentTxns(), budgets: state.budgets, milesConfig: state.milesConfig, cards: state.cards }) });
   } catch (e) {
     body.classList.remove('loading');
     if (e.status) {
@@ -695,8 +682,8 @@ async function manualSync() {
     await syncPull();
     await syncPush();
     // Reload current month into memory
-    const k = storageKey(currentYear, currentMonth);
-    try { transactions[k] = JSON.parse(localStorage.getItem(k) || '[]'); } catch (e) { transactions[k] = []; }
+    const k = storageKey(state.currentYear, state.currentMonth);
+    try { state.transactions[k] = JSON.parse(localStorage.getItem(k) || '[]'); } catch (e) { state.transactions[k] = []; }
     renderAll();
     renderSyncPanel();
     toast('Synced ✓');
@@ -722,12 +709,12 @@ async function connectSyncFromUI() {
       // declaring success — otherwise a refresh right after would lose data.
       await flushPendingWrites();
       // Re-hydrate in-memory state from the freshly pulled data.
-      const k = storageKey(currentYear, currentMonth);
-      try { transactions[k] = JSON.parse(localStorage.getItem(k) || '[]'); } catch (e) { transactions[k] = []; }
+      const k = storageKey(state.currentYear, state.currentMonth);
+      try { state.transactions[k] = JSON.parse(localStorage.getItem(k) || '[]'); } catch (e) { state.transactions[k] = []; }
       const savedBudgets = localStorage.getItem(budgetKey());
-      if (savedBudgets) budgets = JSON.parse(savedBudgets);
+      if (savedBudgets) state.budgets = JSON.parse(savedBudgets);
       const savedMiles = localStorage.getItem(milesKey());
-      if (savedMiles) milesConfig = Object.assign({}, milesConfig, JSON.parse(savedMiles));
+      if (savedMiles) state.milesConfig = Object.assign({}, state.milesConfig, JSON.parse(savedMiles));
       renderAll();
       renderSyncPanel();
       toast(`Pulled from gist ${existingGistId.slice(0, 7)} ✓`);
@@ -771,7 +758,7 @@ function migrateStoredCategories() {
     } catch (e) { /* skip malformed */ }
   }
 
-  // Saved budgets: sum old-key values into their new-key buckets, drop stale keys
+  // Saved state.budgets: sum old-key values into their new-key buckets, drop stale keys
   const rawB = localStorage.getItem(budgetKey());
   if (rawB) {
     try {
@@ -835,7 +822,7 @@ function applyRecurringForMonth(y, m) {
     appliedMap[mk] = [...appliedSet];
     saveRecurringApplied(appliedMap);
     // Refresh in-memory copy if this is the month we're viewing
-    if (transactions[txKey]) transactions[txKey] = txns;
+    if (state.transactions[txKey]) state.transactions[txKey] = txns;
   }
 }
 
@@ -844,50 +831,50 @@ function loadData() {
   migrateStoredCategories();
 
   // Auto-apply recurring for the month we're about to render
-  applyRecurringForMonth(currentYear, currentMonth);
+  applyRecurringForMonth(state.currentYear, state.currentMonth);
 
   // Budgets
   const savedBudgets = localStorage.getItem(budgetKey());
-  if (savedBudgets) budgets = JSON.parse(savedBudgets);
-  else CATEGORIES.forEach(c => { budgets[c.name] = c.budget; });
+  if (savedBudgets) state.budgets = JSON.parse(savedBudgets);
+  else CATEGORIES.forEach(c => { state.budgets[c.name] = c.budget; });
 
   // Miles config — merge saved over defaults so new keys always have values
   const savedMiles = localStorage.getItem(milesKey());
-  if (savedMiles) milesConfig = Object.assign({}, milesConfig, JSON.parse(savedMiles));
+  if (savedMiles) state.milesConfig = Object.assign({}, state.milesConfig, JSON.parse(savedMiles));
 
   // Transactions for current month
-  const key = storageKey(currentYear, currentMonth);
+  const key = storageKey(state.currentYear, state.currentMonth);
   const raw = localStorage.getItem(key);
-  if (raw) transactions[key] = JSON.parse(raw);
-  else transactions[key] = [];
+  if (raw) state.transactions[key] = JSON.parse(raw);
+  else state.transactions[key] = [];
 }
 
 function saveTransactions() {
-  const key = storageKey(currentYear, currentMonth);
-  localStorage.setItem(key, JSON.stringify(transactions[key] || []));
+  const key = storageKey(state.currentYear, state.currentMonth);
+  localStorage.setItem(key, JSON.stringify(state.transactions[key] || []));
   triggerSyncPush();
 }
 
 function currentTxns() {
-  return transactions[storageKey(currentYear, currentMonth)] || [];
+  return state.transactions[storageKey(state.currentYear, state.currentMonth)] || [];
 }
 
 // ─── Month navigation ────────────────────────────────────────────────────────
 function initMonth() {
   const now = new Date();
-  currentYear = now.getFullYear();
-  currentMonth = now.getMonth();
+  state.currentYear = now.getFullYear();
+  state.currentMonth = now.getMonth();
 }
 
 function syncMonthPicker() {
   const el = document.getElementById('monthPicker');
-  if (el) el.value = `${currentYear}-${String(currentMonth+1).padStart(2,'0')}`;
+  if (el) el.value = `${state.currentYear}-${String(state.currentMonth+1).padStart(2,'0')}`;
 }
 
 function changeMonth(delta) {
-  currentMonth += delta;
-  if (currentMonth > 11) { currentMonth = 0; currentYear++; }
-  if (currentMonth < 0)  { currentMonth = 11; currentYear--; }
+  state.currentMonth += delta;
+  if (state.currentMonth > 11) { state.currentMonth = 0; state.currentYear++; }
+  if (state.currentMonth < 0)  { state.currentMonth = 11; state.currentYear--; }
   syncMonthPicker();
   loadData();
   renderAll();
@@ -898,14 +885,14 @@ function onMonthPickerChange() {
   if (!v) return;
   const [y, m] = v.split('-').map(Number);
   if (!y || !m) return;
-  currentYear = y;
-  currentMonth = m - 1;
+  state.currentYear = y;
+  state.currentMonth = m - 1;
   loadData();
   renderAll();
 }
 
 function monthLabel() {
-  return new Date(currentYear, currentMonth, 1).toLocaleString('en-SG', { month: 'long', year: 'numeric' });
+  return new Date(state.currentYear, state.currentMonth, 1).toLocaleString('en-SG', { month: 'long', year: 'numeric' });
 }
 
 // ─── Pages ───────────────────────────────────────────────────────────────────
@@ -931,15 +918,15 @@ function renderDashboard() {
   syncMonthPicker();
   const txns = currentTxns();
   const totalSpent = txns.reduce((s, t) => s + t.amount, 0);
-  const totalBudget = Object.values(budgets).reduce((s, v) => s + v, 0);
+  const totalBudget = Object.values(state.budgets).reduce((s, v) => s + v, 0);
   const remaining = totalBudget - totalSpent;
   const pct = totalBudget > 0 ? totalSpent / totalBudget : 0;
 
-  const prev = previousMonthData({ year: currentYear, month: currentMonth });
+  const prev = previousMonthData({ year: state.currentYear, month: state.currentMonth });
 
-  const days = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const days = new Date(state.currentYear, state.currentMonth + 1, 0).getDate();
   const today = new Date();
-  const dayOfMonth = (today.getFullYear() === currentYear && today.getMonth() === currentMonth)
+  const dayOfMonth = (today.getFullYear() === state.currentYear && today.getMonth() === state.currentMonth)
     ? today.getDate() : days;
   const dailyAvg = dayOfMonth > 0 ? totalSpent / dayOfMonth : 0;
   const projected = dailyAvg * days;
@@ -1011,11 +998,11 @@ function renderDashboard() {
 
   // Card breakdown
   const cardTotals = {};
-  CARDS.forEach(c => cardTotals[c] = 0);
+  state.cards.forEach(c => cardTotals[c] = 0);
   txns.forEach(t => { if (cardTotals[t.card] !== undefined) cardTotals[t.card] += t.amount; });
-  const cardsHtml = CARDS.map(card => {
+  const cardsHtml = state.cards.map(card => {
     const data = cardData(card, txns, cardTotals);
-    const colorVar = `--card-color: ${CARD_COLOR[card] || 'var(--border)'};`;
+    const colorVar = `--card-color: ${state.cardColor[card] || 'var(--border)'};`;
     const badgeHtml = `<span class="txn-card-badge ${CARD_CLASS[card] || ''}" ${cardBadgeStyle(card)}>${card}</span>`;
     const safeCard = escHtml(card);
     const cardJs   = card.replace(/'/g, "\\'");
@@ -1031,7 +1018,7 @@ function renderDashboard() {
       ${data.miles.map(renderMilesRow).join('')}
     `;
     if (!hasBack) {
-      return `<div class="card-stat" data-card="${safeCard}" style="${colorVar}" onclick="openTxnsForCard('${cardJs}')" title="View transactions on ${safeCard}">${frontInner}</div>`;
+      return `<div class="card-stat" data-card="${safeCard}" style="${colorVar}" onclick="openTxnsForCard('${cardJs}')" title="View state.transactions on ${safeCard}">${frontInner}</div>`;
     }
     const backInner = `
       <div class="card-back-title">${badgeHtml} <span style="color:var(--small);font-weight:400;margin-left:6px;">rules</span></div>
@@ -1046,7 +1033,7 @@ function renderDashboard() {
     return `
       <div class="card-stat has-back" data-card="${safeCard}" style="${colorVar}">
         <div class="card-faces">
-          <div class="card-face card-front" onclick="openTxnsForCard('${cardJs}')" title="View transactions on ${safeCard}">${frontInner}</div>
+          <div class="card-face card-front" onclick="openTxnsForCard('${cardJs}')" title="View state.transactions on ${safeCard}">${frontInner}</div>
           <div class="card-face card-back"  onclick="flipCard(this.closest('.card-stat'))" title="Tap to flip back">${backInner}</div>
         </div>
       </div>
@@ -1069,7 +1056,7 @@ function renderDashboard() {
 
   document.getElementById('budgetGrid').innerHTML = CATEGORIES.map(cat => {
     const spent = spentByCategory[cat.name] || 0;
-    const bud   = budgets[cat.name] || cat.budget;
+    const bud   = state.budgets[cat.name] || cat.budget;
     const pct   = bud > 0 ? Math.min(spent / bud, 1) : 0;
     const over  = spent > bud;
     const warn  = spent > bud * 0.8;
@@ -1078,7 +1065,7 @@ function renderDashboard() {
     const tagText  = cat.fixed ? 'Fixed' : over ? 'Over' : warn ? 'Near limit' : 'On track';
     const catJs = cat.name.replace(/'/g, "\\'");
     return `
-      <div class="budget-item" style="--cat-color: ${cat.color || 'var(--border)'}; cursor: pointer;" onclick="openTxnsForCategory('${catJs}')" title="View ${escHtml(cat.name)} transactions">
+      <div class="budget-item" style="--cat-color: ${cat.color || 'var(--border)'}; cursor: pointer;" onclick="openTxnsForCategory('${catJs}')" title="View ${escHtml(cat.name)} state.transactions">
         <div class="budget-header">
           <div>
             <div class="budget-cat"><span class="budget-emoji">${cat.emoji}</span>${cat.name}</div>
@@ -1102,7 +1089,7 @@ function renderDashboard() {
 // ─── Miles Tracker ────────────────────────────────────────────────────────────
 
 function milesPanel({ id, label, subLabel, badgeClass, card, spent, threshold, rate, note, isAnnual }) {
-  const cardColor = CARD_COLOR[card] || 'var(--border)';
+  const cardColor = state.cardColor[card] || 'var(--border)';
   const pct = threshold > 0 ? Math.min(spent / threshold, 1) : 0;
   const hit = spent >= threshold;
   const close = !hit && spent >= threshold * 0.75;
@@ -1148,12 +1135,12 @@ function renderMilesTracker(txns, cardTotals) {
   const hsbcSpent = cardTotals?.['HSBC Revolution'] || 0;
 
   // UOB Lady's Fashion: UOB Lady's card + fashion-mapped categories
-  const fashionSet = new Set(milesConfig.fashionCats);
+  const fashionSet = new Set(state.milesConfig.fashionCats);
   const uobFashion = txns.filter(t => t.card === "UOB Lady's" && fashionSet.has(t.category))
                          .reduce((s, t) => s + t.amount, 0);
 
   // UOB Lady's Dining: UOB Lady's card + dining-mapped categories
-  const diningSet = new Set(milesConfig.diningCats);
+  const diningSet = new Set(state.milesConfig.diningCats);
   const uobDining = txns.filter(t => t.card === "UOB Lady's" && diningSet.has(t.category))
                         .reduce((s, t) => s + t.amount, 0);
 
@@ -1168,7 +1155,7 @@ function renderMilesTracker(txns, cardTotals) {
       badgeClass: 'card-hsbc',
       card: 'HSBC Revolution',
       spent: hsbcSpent,
-      threshold: milesConfig.hsbc,
+      threshold: state.milesConfig.hsbc,
       rate: '4 mpd',
       note: 'Contactless + online spend. Excludes SimplyGo, fast food delivery, OTAs.',
       isAnnual: false,
@@ -1176,11 +1163,11 @@ function renderMilesTracker(txns, cardTotals) {
     'uob-fashion': milesPanel({
       id: 'uob-fashion',
       label: "UOB Lady's · Fashion",
-      subLabel: milesConfig.fashionCats.join(' · '),
+      subLabel: state.milesConfig.fashionCats.join(' · '),
       badgeClass: 'card-uob-lady',
       card: "UOB Lady's",
       spent: uobFashion,
-      threshold: milesConfig.uobLadyFashion,
+      threshold: state.milesConfig.uobLadyFashion,
       rate: '4 mpd',
       note: 'Tracks UOB Lady\'s card spend in Fashion-mapped categories.',
       isAnnual: false,
@@ -1188,11 +1175,11 @@ function renderMilesTracker(txns, cardTotals) {
     'uob-dining': milesPanel({
       id: 'uob-dining',
       label: "UOB Lady's · Dining",
-      subLabel: milesConfig.diningCats.join(' · '),
+      subLabel: state.milesConfig.diningCats.join(' · '),
       badgeClass: 'card-uob-lady',
       card: "UOB Lady's",
       spent: uobDining,
-      threshold: milesConfig.uobLadyDining,
+      threshold: state.milesConfig.uobLadyDining,
       rate: '4 mpd',
       note: 'Tracks UOB Lady\'s card spend in Dining-mapped categories.',
       isAnnual: false,
@@ -1204,9 +1191,9 @@ function renderMilesTracker(txns, cardTotals) {
       badgeClass: 'card-uob-kf',
       card: 'UOB KrisFlyer',
       spent: kfYTD,
-      threshold: milesConfig.kfAnnual,
+      threshold: state.milesConfig.kfAnnual,
       rate: '3 mpd on SQ/Scoot',
-      note: 'Tracks all UOB KrisFlyer card spend YTD. Must hit $' + milesConfig.kfAnnual + '/year to unlock 2.4 mpd bonus.',
+      note: 'Tracks all UOB KrisFlyer card spend YTD. Must hit $' + state.milesConfig.kfAnnual + '/year to unlock 2.4 mpd bonus.',
       isAnnual: true,
     }),
   };
@@ -1251,7 +1238,7 @@ function renderTransactions() {
 
   const body = document.getElementById('txnListBody');
   if (txns.length === 0) {
-    body.innerHTML = `<div class="empty">🧾<p>No transactions yet for ${monthLabel()}</p></div>`;
+    body.innerHTML = `<div class="empty">🧾<p>No state.transactions yet for ${monthLabel()}</p></div>`;
     return;
   }
 
@@ -1283,8 +1270,8 @@ function renderTransactions() {
 }
 
 function deleteTxn(id) {
-  const key = storageKey(currentYear, currentMonth);
-  transactions[key] = (transactions[key] || []).filter(t => t.id !== id);
+  const key = storageKey(state.currentYear, state.currentMonth);
+  state.transactions[key] = (state.transactions[key] || []).filter(t => t.id !== id);
   saveTransactions();
   renderAll();
   toast('Transaction deleted');
@@ -1301,7 +1288,7 @@ function renderSettings() {
         <td>${cat.fixed ? '<span class="fixed-badge">Fixed</span>' : '<span style="font-size:11px;color:var(--muted)">Discretionary</span>'}</td>
         <td style="text-align:right">
           <input type="number" id="bud_${cat.name.replace(/\W/g,'_')}"
-            value="${budgets[cat.name] || cat.budget}" min="0" step="1"
+            value="${state.budgets[cat.name] || cat.budget}" min="0" step="1"
             ${cat.fixed ? 'style="opacity:0.5"' : ''}>
         </td>
       </tr>
@@ -1311,12 +1298,12 @@ function renderSettings() {
 
 function renderMilesSettings() {
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
-  set('miles_hsbc', milesConfig.hsbc);
-  set('miles_uob_fashion', milesConfig.uobLadyFashion);
-  set('miles_uob_dining', milesConfig.uobLadyDining);
-  set('miles_kf_annual', milesConfig.kfAnnual);
-  set('miles_fashion_cats', (milesConfig.fashionCats || []).join(', '));
-  set('miles_dining_cats', (milesConfig.diningCats || []).join(', '));
+  set('miles_hsbc', state.milesConfig.hsbc);
+  set('miles_uob_fashion', state.milesConfig.uobLadyFashion);
+  set('miles_uob_dining', state.milesConfig.uobLadyDining);
+  set('miles_kf_annual', state.milesConfig.kfAnnual);
+  set('miles_fashion_cats', (state.milesConfig.fashionCats || []).join(', '));
+  set('miles_dining_cats', (state.milesConfig.diningCats || []).join(', '));
 }
 
 function saveMilesSettings() {
@@ -1326,7 +1313,7 @@ function saveMilesSettings() {
     const parsed = v.split(',').map(s => s.trim()).filter(Boolean);
     return parsed.length ? parsed : def;
   };
-  milesConfig = {
+  state.milesConfig = {
     hsbc: get('miles_hsbc', 1000),
     uobLadyFashion: get('miles_uob_fashion', 750),
     uobLadyDining: get('miles_uob_dining', 750),
@@ -1334,7 +1321,7 @@ function saveMilesSettings() {
     fashionCats: getCats('miles_fashion_cats', ['Luxury Fashion', 'Clothing & Apparel']),
     diningCats: getCats('miles_dining_cats', ['Fine Dining', 'Casual Dining', 'Cafes & Coffee']),
   };
-  localStorage.setItem(milesKey(), JSON.stringify(milesConfig));
+  localStorage.setItem(milesKey(), JSON.stringify(state.milesConfig));
   triggerSyncPush();
   renderDashboard();
   toast('Miles settings saved ✓');
@@ -1344,9 +1331,9 @@ function saveBudgets() {
   CATEGORIES.forEach(cat => {
     const id = `bud_${cat.name.replace(/\W/g,'_')}`;
     const el = document.getElementById(id);
-    if (el) budgets[cat.name] = parseFloat(el.value) || 0;
+    if (el) state.budgets[cat.name] = parseFloat(el.value) || 0;
   });
-  localStorage.setItem(budgetKey(), JSON.stringify(budgets));
+  localStorage.setItem(budgetKey(), JSON.stringify(state.budgets));
   triggerSyncPush();
   renderDashboard();
   toast('Budgets saved ✓');
@@ -1357,9 +1344,9 @@ function saveBudgets() {
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
 function clearMonth() {
-  if (!confirm(`Clear all transactions for ${monthLabel()}? This cannot be undone.`)) return;
-  const key = storageKey(currentYear, currentMonth);
-  transactions[key] = [];
+  if (!confirm(`Clear all state.transactions for ${monthLabel()}? This cannot be undone.`)) return;
+  const key = storageKey(state.currentYear, state.currentMonth);
+  state.transactions[key] = [];
   saveTransactions();
   renderAll();
   toast('Month cleared');
@@ -1423,12 +1410,12 @@ async function bootApp() {
     const r = await syncPull();
     if (r.pulled) {
       // Reload everything from the freshly-pulled localStorage
-      const key = storageKey(currentYear, currentMonth);
-      try { transactions[key] = JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) { transactions[key] = []; }
+      const key = storageKey(state.currentYear, state.currentMonth);
+      try { state.transactions[key] = JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) { state.transactions[key] = []; }
       const savedBudgets = localStorage.getItem(budgetKey());
-      if (savedBudgets) budgets = JSON.parse(savedBudgets);
+      if (savedBudgets) state.budgets = JSON.parse(savedBudgets);
       const savedMiles = localStorage.getItem(milesKey());
-      if (savedMiles) milesConfig = Object.assign({}, milesConfig, JSON.parse(savedMiles));
+      if (savedMiles) state.milesConfig = Object.assign({}, state.milesConfig, JSON.parse(savedMiles));
       refreshCards();
       populateCardSelects();
       renderAll();
@@ -1455,11 +1442,11 @@ async function bootApp() {
   showLockOverlay({ setup: !loadEncMeta() });
 })();
 
-// Inject the bits each ui module needs from app.js state/helpers — avoids
-// circular imports of the module-let mutables. Called once at module load.
+// Inject the orchestration callbacks each ui module needs. State reads
+// (currentYear, currentMonth, transactions, cards, validCards) go straight
+// through `import { state } from './state.js'` inside each module — no
+// accessors needed.
 setImportContext({
-  getCards: () => CARDS,
-  getValidCards: () => VALID_CARDS,
   monthLabel: () => monthLabel(),
   addTxnToStore: (t) => addTxnToStore(t),
   renderAll: () => renderAll(),
@@ -1467,7 +1454,6 @@ setImportContext({
 });
 setLockContext({ onUnlock: () => bootApp() });
 setAddCardContext({
-  getCards: () => CARDS,
   loadCustomCards: () => loadCustomCards(),
   saveCustomCards: (l) => saveCustomCards(l),
   nextCustomColor: () => nextCustomColor(),
@@ -1477,17 +1463,12 @@ setAddCardContext({
   toast: (msg) => toast(msg),
 });
 setRecurringContext({
-  getCurrentYear: () => currentYear,
-  getCurrentMonth: () => currentMonth,
   monthLabel: () => monthLabel(),
   applyRecurringForMonth: (y, m) => applyRecurringForMonth(y, m),
   renderAll: () => renderAll(),
   toast: (msg) => toast(msg),
 });
 setAddTxnContext({
-  getCurrentYear: () => currentYear,
-  getCurrentMonth: () => currentMonth,
-  getTransactions: () => transactions,
   saveTransactions: () => saveTransactions(),
   renderAll: () => renderAll(),
   toast: (msg) => toast(msg),
@@ -1501,7 +1482,7 @@ setAddTxnContext({
 // piece of work that didn't fit alongside the file extractions. It belongs
 // in a follow-up sweep that:
 //   1. removes onclick="…" / oninput="…" / onkeydown="…" from index.html
-//      and from JS template strings that emit dynamic rows (transactions
+//      and from JS template strings that emit dynamic rows (state.transactions
 //      list, import entries, recurring list, budget items, card tiles)
 //   2. wires the same logic via addEventListener at boot (static markup)
 //      and event delegation on parent containers (dynamic rows)

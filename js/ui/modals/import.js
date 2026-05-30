@@ -4,13 +4,12 @@
 
 import { VALID_CATS } from '../../config.js';
 import { escHtml } from '../../utils.js';
+import { state } from '../../state.js';
 import { txnFingerprint, buildExistingTxnFingerprints } from '../../domain/dedup.js';
 
-// Set at module load via setImportContext — lets app.js inject the bits the
-// modal needs without ui modules circular-importing app.js mutables.
+// state read directly via the imported state object. The remaining context
+// is just callbacks into orchestration that lives in app.js.
 let _ctx = {
-  getCards: () => [],
-  getValidCards: () => new Set(),
   monthLabel: () => '',
   addTxnToStore: () => {},
   renderAll: () => {},
@@ -83,8 +82,6 @@ export function dropImportEntry(i) {
 }
 
 function parseImportJson() {
-  const cards = _ctx.getCards();
-  const validCards = _ctx.getValidCards();
   const raw = document.getElementById('importJson').value.trim();
   if (!raw) throw new Error('Paste is empty.');
   let parsed;
@@ -102,7 +99,7 @@ function parseImportJson() {
     if (t.amount == null) missing.push('amount');
     if (missing.length) { errors.push(`Row ${i+1}: missing ${missing.join(', ')}`); return; }
     if (!VALID_CATS.has(t.category)) { errors.push(`Row ${i+1}: unknown category "${t.category}"`); return; }
-    if (!validCards.has(t.card)) { errors.push(`Row ${i+1}: unknown card "${t.card}". Valid: ${cards.join(', ')}`); return; }
+    if (!state.validCards.has(t.card)) { errors.push(`Row ${i+1}: unknown card "${t.card}". Valid: ${state.cards.join(', ')}`); return; }
     const amt = parseFloat(t.amount);
     if (isNaN(amt) || amt <= 0) { errors.push(`Row ${i+1}: invalid amount "${t.amount}"`); return; }
     const row = { date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: amt };
