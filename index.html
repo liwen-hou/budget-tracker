@@ -3467,14 +3467,26 @@ function onImportJsonInput() {
   renderImportEntries();
 }
 
-// Fingerprint = the set of fields that make a transaction "the same". Used
-// to flag exact duplicates in the import review list. Amount is normalised
-// to 2dp so 42 / 42.0 / 42.00 all collide; missing MCC normalises to "".
+// Fingerprint = the identifying fields of a purchase event. Used to flag
+// duplicates in the import review list. Normalisation handles real-world
+// divergences between manual entries, OCR re-scans, and synced data:
+//   • date     → first 10 chars, so "2026-05-19T00:00:00Z" matches "2026-05-19"
+//   • merchant → lowercase + collapsed whitespace + trim, so casing and
+//                trailing spaces don't matter (substring differences like
+//                "NTUC" vs "NTUC FAIRPRICE" intentionally still don't match —
+//                fuzzy matching would produce false positives)
+//   • amount   → abs + 2dp, so sign and trailing zeros don't matter
+//   • card     → trimmed
+// Category and MCC are deliberately excluded — they're post-hoc labels,
+// not part of a purchase's identity. Two entries for the same NTUC charge
+// labelled Groceries vs Shopping are still the same purchase.
 function txnFingerprint(t) {
+  const date = String(t.date || '').slice(0, 10);
+  const merchant = String(t.merchant || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const card = String(t.card || '').trim();
   const amt = parseFloat(t.amount);
-  const amtStr = isNaN(amt) ? String(t.amount ?? '') : amt.toFixed(2);
-  const mcc = (t.mcc != null && String(t.mcc).trim() !== '') ? String(t.mcc).trim() : '';
-  return [t.date || '', t.merchant || '', t.category || '', t.card || '', amtStr, mcc].join('|');
+  const amtStr = isNaN(amt) ? '' : Math.abs(amt).toFixed(2);
+  return [date, merchant, card, amtStr].join('|');
 }
 
 // Walk every txns_* bucket in localStorage (not just the current month) so a
@@ -3519,7 +3531,7 @@ function renderImportEntries() {
       ${arr.map((entry, i) => `
         <div class="import-entry-row${flags[i] ? ' is-duplicate' : ''}">
           <code class="import-entry-json">${escHtml(JSON.stringify(entry))}</code>
-          ${flags[i] ? '<span class="import-entry-dup-badge" title="An identical transaction already exists in your saved data">Duplicate</span>' : ''}
+          ${flags[i] ? '<span class="import-entry-dup-badge" title="Same date, merchant, card, and amount as a saved transaction">Duplicate</span>' : ''}
           <button class="import-entry-del" onclick="dropImportEntry(${i})" title="Remove">×</button>
         </div>
       `).join('')}
