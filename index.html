@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Budget">
 <title>Liwen — Budget Tracker</title>
 <style>
   :root {
@@ -325,6 +328,25 @@
   .card-miles-bar.orange { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
   .card-miles-bar.red    { background: linear-gradient(90deg, #dc2626, #f87171); }
   .card-flip-hint { font-size: 10px; color: var(--small); margin-top: 12px; text-align: right; }
+
+  /* ⓘ button — sits on the front face of a flippable card so the body tap
+     can be used to navigate to filtered Transactions instead of flipping. */
+  .card-rules-btn {
+    position: absolute; top: 6px; right: 8px;
+    background: transparent; border: none;
+    color: var(--muted);
+    font-size: 16px; line-height: 1;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+    z-index: 2;
+  }
+  .card-rules-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+  .card-stat.has-back .card-front { cursor: pointer; position: relative; }
+
+  /* Update banner */
+  @keyframes updateBannerIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
   /* 3D flip card — only applied when the card has miles (.has-back). The
      FRONT face is statically positioned so it determines the height of
@@ -801,6 +823,17 @@
         <button class="btn" onclick="openRecurringModal()">＋ Add Recurring</button>
       </div>
       <div id="recurringList"></div>
+    </div>
+
+    <!-- App version + manual refresh (helps when iOS PWA shell caches HTML) -->
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:13px;font-weight:600;">App version</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;" id="appVersionLine">v<span id="appVersionText"></span> · tap refresh if iOS is showing an old build</div>
+        </div>
+        <button class="btn btn-outline" onclick="manualRefreshApp()">↻ Check for update</button>
+      </div>
     </div>
 
     <!-- Danger Zone -->
@@ -1478,6 +1511,61 @@ document.addEventListener('visibilitychange', () => {
 const OCR_MODEL = 'claude-haiku-4-5';
 const ANALYSIS_MODEL = 'claude-sonnet-4-6';
 
+// Bump on every release. The PWA shell on iOS caches the HTML and won't
+// pull updates on its own; checkForAppUpdate() fetches the live index.html,
+// reads this constant, and if it differs from the version that's running it
+// shows a tap-to-refresh banner.
+const APP_VERSION = '2026-05-30.001';
+
+let _lastUpdateCheck = 0;
+async function checkForAppUpdate({ force = false } = {}) {
+  if (!force && Date.now() - _lastUpdateCheck < 30_000) return;
+  _lastUpdateCheck = Date.now();
+  try {
+    const url = window.location.href.split('?')[0].split('#')[0];
+    const res = await fetch(url + '?cb=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const html = await res.text();
+    const m = html.match(/const APP_VERSION = '([^']+)'/);
+    if (m && m[1] !== APP_VERSION) showUpdateBanner(m[1]);
+  } catch (e) { /* offline / blocked — ignore */ }
+}
+
+function showUpdateBanner(newVersion) {
+  if (document.getElementById('updateBanner')) return;
+  const b = document.createElement('div');
+  b.id = 'updateBanner';
+  b.innerHTML = `<span style="font-size:18px;line-height:1;">📦</span> <strong>New version available</strong> <span style="opacity:0.85;font-size:11px;margin-left:6px;">tap to refresh</span>`;
+  b.style.cssText = `
+    position: fixed; left: 14px; right: 14px; bottom: 90px;
+    background: var(--accent); color: #fff;
+    padding: 12px 16px; border-radius: 12px;
+    font-size: 13px; cursor: pointer;
+    z-index: 200; text-align: center;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+    display: flex; gap: 8px; align-items: center; justify-content: center;
+    animation: updateBannerIn 0.3s ease-out;
+  `;
+  b.onclick = () => { location.reload(); };
+  document.body.appendChild(b);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) checkForAppUpdate();
+});
+
+async function manualRefreshApp() {
+  toast('Checking for new version…');
+  await checkForAppUpdate({ force: true });
+  // If checkForAppUpdate found one it already showed the banner; if not,
+  // tell the user we're up-to-date but offer a hard reload anyway.
+  if (!document.getElementById('updateBanner')) {
+    if (confirm('You\'re already on the latest version (v' + APP_VERSION + ').\n\nForce-reload anyway?')) {
+      location.reload();
+    }
+  }
+}
+
 function loadOcrConfig() {
   try { return JSON.parse(localStorage.getItem(ocrConfigKey()) || '{}'); } catch (e) { return {}; }
 }
@@ -1921,13 +2009,38 @@ function renderMilesRow(m) {
 }
 
 // Suppress the click that follows a long-press drag, so reordering a card
-// doesn't also flip it.
+// doesn't also flip it or jump to Transactions.
 let _recentlyReordered = false;
 function flipCard(el) {
   if (_recentlyReordered) return;
   if (!el.classList.contains('has-back')) return;
   el.classList.toggle('flipped');
 }
+
+// Navigate to the Transactions page with a single filter applied.
+function _navToTransactionsWithFilter({ card = '', category = '' } = {}) {
+  if (_recentlyReordered) return;
+  // Make sure the Category select has its options before we set a value
+  // (renderTransactions used to populate them lazily on first render).
+  const catEl    = document.getElementById('txnFilter');
+  const cardEl   = document.getElementById('txnCardFilter');
+  const searchEl = document.getElementById('txnSearch');
+  if (catEl && catEl.options.length <= 1) {
+    CATEGORIES.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.name; opt.textContent = c.name;
+      catEl.appendChild(opt);
+    });
+  }
+  if (catEl)    catEl.value    = category;
+  if (cardEl)   cardEl.value   = card;
+  if (searchEl) searchEl.value = '';
+  const navTx = Array.from(document.querySelectorAll('.nav-item'))
+    .find(n => /showPage\('transactions'/.test(n.getAttribute('onclick') || ''));
+  showPage('transactions', navTx);
+}
+function openTxnsForCard(card)    { _navToTransactionsWithFilter({ card }); }
+function openTxnsForCategory(cat) { _navToTransactionsWithFilter({ category: cat }); }
 
 // Generic long-press drag-to-reorder for a horizontal carousel.
 // dragSelector: which tiles are draggable (e.g. ".card-stat:not(.add-card-tile)").
@@ -2701,7 +2814,10 @@ function showPage(name, el) {
   if (el) el.classList.add('active');
   // Tag main so CSS can hide top actions on Settings
   document.querySelector('.main')?.setAttribute('data-active', name);
-  if (name === 'settings') { renderSettings(); renderMilesSettings(); renderRecurringList(); renderSyncPanel(); renderOcrPanel(); }
+  if (name === 'settings') {
+    renderSettings(); renderMilesSettings(); renderRecurringList(); renderSyncPanel(); renderOcrPanel();
+    const v = document.getElementById('appVersionText'); if (v) v.textContent = APP_VERSION;
+  }
   if (name === 'transactions') renderTransactions();
   if (name === 'dashboard') renderDashboard();
 }
@@ -2821,15 +2937,21 @@ function renderDashboard() {
     const data = cardData(card, txns, cardTotals);
     const colorVar = `--card-color: ${CARD_COLOR[card] || 'var(--border)'};`;
     const badgeHtml = `<span class="txn-card-badge ${CARD_CLASS[card] || ''}" ${cardBadgeStyle(card)}>${card}</span>`;
+    const safeCard = escHtml(card);
+    const cardJs   = card.replace(/'/g, "\\'");
+    const hasBack  = data.miles.length > 0;
+    const rulesBtn = hasBack
+      ? `<button class="card-rules-btn" onclick="event.stopPropagation(); flipCard(this.closest('.card-stat'))" title="See rules" aria-label="See rules">ⓘ</button>`
+      : '';
     const frontInner = `
+      ${rulesBtn}
       <div class="card-name">${badgeHtml}</div>
       <div class="card-total" style="margin-top:8px;">$${fmt(data.total)}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px;">${data.txnCount} txn${data.txnCount===1?'':'s'}</div>
       ${data.miles.map(renderMilesRow).join('')}
-      ${data.miles.length ? `<div class="card-flip-hint">tap for rules ↻</div>` : ''}
     `;
-    if (!data.miles.length) {
-      return `<div class="card-stat" data-card="${escHtml(card)}" style="${colorVar}">${frontInner}</div>`;
+    if (!hasBack) {
+      return `<div class="card-stat" data-card="${safeCard}" style="${colorVar}" onclick="openTxnsForCard('${cardJs}')" title="View transactions on ${safeCard}">${frontInner}</div>`;
     }
     const backInner = `
       <div class="card-back-title">${badgeHtml} <span style="color:var(--small);font-weight:400;margin-left:6px;">rules</span></div>
@@ -2842,10 +2964,10 @@ function renderDashboard() {
       <div class="card-back-hint">tap to flip back ↺</div>
     `;
     return `
-      <div class="card-stat has-back" data-card="${escHtml(card)}" style="${colorVar}" onclick="flipCard(this)">
+      <div class="card-stat has-back" data-card="${safeCard}" style="${colorVar}">
         <div class="card-faces">
-          <div class="card-face card-front">${frontInner}</div>
-          <div class="card-face card-back">${backInner}</div>
+          <div class="card-face card-front" onclick="openTxnsForCard('${cardJs}')" title="View transactions on ${safeCard}">${frontInner}</div>
+          <div class="card-face card-back"  onclick="flipCard(this.closest('.card-stat'))" title="Tap to flip back">${backInner}</div>
         </div>
       </div>
     `;
@@ -2874,8 +2996,9 @@ function renderDashboard() {
     const barClass = over ? 'red' : warn ? 'orange' : 'green';
     const tagClass = cat.fixed ? 'tag-fixed' : over ? 'tag-over' : warn ? 'tag-warn' : 'tag-ok';
     const tagText  = cat.fixed ? 'Fixed' : over ? 'Over' : warn ? 'Near limit' : 'On track';
+    const catJs = cat.name.replace(/'/g, "\\'");
     return `
-      <div class="budget-item" style="--cat-color: ${cat.color || 'var(--border)'};">
+      <div class="budget-item" style="--cat-color: ${cat.color || 'var(--border)'}; cursor: pointer;" onclick="openTxnsForCategory('${catJs}')" title="View ${escHtml(cat.name)} transactions">
         <div class="budget-header">
           <div>
             <div class="budget-cat"><span class="budget-emoji">${cat.emoji}</span>${cat.name}</div>
@@ -3413,6 +3536,8 @@ async function bootApp() {
   renderDashboard();
   setupCardReorder();
   applyPrivacyPref();
+  // PWA shell on iOS won't pull updates on its own — check in the background.
+  setTimeout(() => checkForAppUpdate(), 3000);
 
   // Background pull on startup (non-blocking; UI is already up)
   const cfg = loadSyncConfig();
