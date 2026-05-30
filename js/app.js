@@ -362,7 +362,7 @@ async function generateSpendAnalysis() {
   body.innerHTML = `<div>${escHtml(text)}</div>
     <div class="analysis-meta">
       <span>${new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' })}</span>
-      <a onclick="generateSpendAnalysis()">↻ Refresh</a>
+      <a data-act="generate-analysis" style="cursor:pointer">↻ Refresh</a>
     </div>`;
   btn.disabled = false;
   btn.textContent = 'Regenerate';
@@ -722,35 +722,120 @@ setSettingsContext({
   renderDashboard: () => renderDashboard(),
 });
 
-// ─── Inline-handler compatibility shim ───────────────────────────────────────
-// Phase 1 of the refactor put 65 inline `onclick="…"` / `oninput="…"` /
-// `onkeydown="…"` attributes through this re-export so app.js could move to
-// `<script type="module">`. The shim is still in place after phases 2–6 —
-// migrating every inline attribute to addEventListener is a substantial
-// piece of work that didn't fit alongside the file extractions. It belongs
-// in a follow-up sweep that:
-//   1. removes onclick="…" / oninput="…" / onkeydown="…" from index.html
-//      and from JS template strings that emit dynamic rows (state.transactions
-//      list, import entries, recurring list, budget items, card tiles)
-//   2. wires the same logic via addEventListener at boot (static markup)
-//      and event delegation on parent containers (dynamic rows)
-//   3. deletes this Object.assign block
-// Cost of leaving it for now: 44 names leak onto window. Benefit: the app
-// works.
+// ─── Global event delegation ────────────────────────────────────────────────
+// One body-level listener per event type, dispatching by data-act value.
+// Replaces the 65 inline `onclick="…"` / `oninput="…"` / `onkeydown="…"`
+// attributes that index.html and JS template strings used to carry. Each
+// action handler is called with (element, event) — element is the closest
+// ancestor with data-act, so handlers can read params from its dataset.
 //
-// Names are sorted alphabetically by category for easy diff during cleanup.
-Object.assign(window, {
-  changeMonth, clearMonth, clearOcrKeyFromUI,
-  closeAddCardModal, closeAddTxn, closeAnalysisModal, closeImport,
-  closeModalOutside, closeRecurringModal,
-  connectSyncFromUI, deleteRecurring, deleteTxn, disconnectSyncFromUI,
-  dropImportEntry, enrichTransactionsWithAI, exportData, flipCard,
-  generateSpendAnalysis, handleScannedReceipt,
-  manualRefreshApp, manualSync,
-  onImportJsonInput, onMccInputChange, onMonthPickerChange,
-  openAddCardModal, openAddTxn, openAnalysisModal, openEditTxn,
-  openRecurringModal, openScanReceipt,
-  openTxnsForCard, openTxnsForCategory, processImport, renderTransactions,
-  saveBudgets, saveMilesSettings, saveOcrKeyFromUI, saveRecurring, saveTxn,
-  showPage, submitAddCard, submitLock, togglePrivacy, validateImport,
+// Patterns covered:
+//   • static button clicks       — data-act="..." on the button
+//   • dynamic row clicks         — data-act + data-id/data-card/data-cat
+//                                   in JS template strings; bubbles up to
+//                                   the body listener via event delegation
+//   • textarea/select input/change — data-act on the form element
+//   • Enter-to-submit on inputs    — data-enter-act on the input
+//   • modal backdrop close         — generic: if click target IS .overlay,
+//                                    close that overlay (no per-modal data-act)
+const CLICK_ACTIONS = {
+  // import modal
+  'close-import':       () => closeImport(),
+  'validate-import':    () => validateImport(),
+  'process-import':     () => processImport(),
+  'drop-import-entry':  (t) => dropImportEntry(+t.dataset.idx),
+  // add/edit txn modal
+  'open-add-txn':       () => openAddTxn(),
+  'close-add-txn':      () => closeAddTxn(),
+  'save-txn':           () => saveTxn(),
+  'open-edit-txn':      (t) => openEditTxn(t.dataset.id),
+  'delete-txn':         (t) => deleteTxn(t.dataset.id),
+  // add-card modal
+  'open-add-card':      () => openAddCardModal(),
+  'close-add-card':     () => closeAddCardModal(),
+  'submit-add-card':    () => submitAddCard(),
+  // analysis modal
+  'open-analysis':      () => openAnalysisModal(),
+  'close-analysis':     () => closeAnalysisModal(),
+  'generate-analysis':  () => generateSpendAnalysis(),
+  // recurring modal + list
+  'open-recurring':     (t) => openRecurringModal(t.dataset.id || null),
+  'close-recurring':    () => closeRecurringModal(),
+  'save-recurring':     () => saveRecurring(),
+  'delete-recurring':   (t) => {
+    if (confirm(`Delete recurring "${t.dataset.merchant}"? Past auto-added rows are kept.`)) {
+      deleteRecurring(t.dataset.id);
+    }
+  },
+  // scan + enrich
+  'open-scan':          () => openScanReceipt(),
+  'enrich-txns':        () => enrichTransactionsWithAI(),
+  // month nav
+  'month-prev':         () => changeMonth(-1),
+  'month-next':         () => changeMonth(+1),
+  // page nav
+  'show-dashboard':     (t) => showPage('dashboard', t),
+  'show-transactions':  (t) => showPage('transactions', t),
+  'show-settings':      (t) => showPage('settings', t),
+  // settings
+  'save-budgets':       () => saveBudgets(),
+  'save-miles-settings':() => saveMilesSettings(),
+  'save-ocr-key':       () => saveOcrKeyFromUI(),
+  'clear-ocr-key':      () => clearOcrKeyFromUI(),
+  // sync
+  'manual-sync':        () => manualSync(),
+  'connect-sync':       () => connectSyncFromUI(),
+  'disconnect-sync':    () => disconnectSyncFromUI(),
+  // misc
+  'manual-refresh':     () => manualRefreshApp(),
+  'export-data':        () => exportData(),
+  'clear-month':        () => clearMonth(),
+  'toggle-privacy':     () => togglePrivacy(),
+  'submit-lock':        () => submitLock(),
+  // dashboard tiles
+  'open-txns-card':     (t) => openTxnsForCard(t.dataset.card),
+  'open-txns-cat':      (t) => openTxnsForCategory(t.dataset.cat),
+  'flip-card':          (t, e) => { e.stopPropagation(); flipCard(t.closest('.card-stat')); },
+};
+const INPUT_ACTIONS = {
+  'on-import-input': () => onImportJsonInput(),
+  'on-mcc-input':    () => onMccInputChange(),
+  'render-txns':     () => renderTransactions(),
+};
+const CHANGE_ACTIONS = {
+  'on-month-picker':   () => onMonthPickerChange(),
+  'on-scan-file':      (t, e) => handleScannedReceipt(e),
+  'render-txns':       () => renderTransactions(),
+};
+
+document.body.addEventListener('click', e => {
+  // Backdrop click — close the overlay if the target IS the overlay itself
+  // (not bubbled from a click inside the modal body).
+  if (e.target.classList && e.target.classList.contains('overlay')) {
+    e.target.style.display = 'none';
+    return;
+  }
+  const t = e.target.closest('[data-act]');
+  if (!t) return;
+  const fn = CLICK_ACTIONS[t.dataset.act];
+  if (fn) fn(t, e);
+});
+document.body.addEventListener('input', e => {
+  const t = e.target.closest('[data-act]');
+  if (!t) return;
+  const fn = INPUT_ACTIONS[t.dataset.act];
+  if (fn) fn(t, e);
+});
+document.body.addEventListener('change', e => {
+  const t = e.target.closest('[data-act]');
+  if (!t) return;
+  const fn = CHANGE_ACTIONS[t.dataset.act];
+  if (fn) fn(t, e);
+});
+document.body.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const t = e.target.closest('[data-enter-act]');
+  if (!t) return;
+  const fn = CLICK_ACTIONS[t.dataset.enterAct];
+  if (fn) fn(t, e);
 });

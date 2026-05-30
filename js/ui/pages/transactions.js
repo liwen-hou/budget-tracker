@@ -102,8 +102,8 @@ export function renderTransactions() {
       <span><span class="txn-card-badge ${CARD_CLASS[t.card] || ''}" ${cardBadgeStyle(t.card)}>${t.card}</span></span>
       <span class="txn-amount">$${fmt(t.amount)}</span>
       <span class="txn-row-actions">
-        <button class="btn-edit" onclick="openEditTxn('${t.id}')" title="Edit">✎</button>
-        <button class="btn-del" onclick="deleteTxn('${t.id}')" title="Delete">✕</button>
+        <button class="btn-edit" data-act="open-edit-txn" data-id="${t.id}" title="Edit">✎</button>
+        <button class="btn-del" data-act="delete-txn" data-id="${t.id}" title="Delete">✕</button>
       </span>
     </div>
   `;}).join('');

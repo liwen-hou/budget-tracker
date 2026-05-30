@@ -177,7 +177,7 @@ export function renderDashboard() {
     const cardJs   = card.replace(/'/g, "\\'");
     const hasBack  = data.miles.length > 0;
     const rulesBtn = hasBack
-      ? `<button class="card-rules-btn" onclick="event.stopPropagation(); flipCard(this.closest('.card-stat'))" title="See rules" aria-label="See rules">ⓘ</button>`
+      ? `<button class="card-rules-btn" data-act="flip-card" title="See rules" aria-label="See rules">ⓘ</button>`
       : '';
     const frontInner = `
       ${rulesBtn}
@@ -187,7 +187,7 @@ export function renderDashboard() {
       ${data.miles.map(renderMilesRow).join('')}
     `;
     if (!hasBack) {
-      return `<div class="card-stat" data-card="${safeCard}" style="${colorVar}" onclick="openTxnsForCard('${cardJs}')" title="View transactions on ${safeCard}">${frontInner}</div>`;
+      return `<div class="card-stat" data-card="${safeCard}" style="${colorVar}" data-act="open-txns-card" data-card="${cardJs}" title="View transactions on ${safeCard}">${frontInner}</div>`;
     }
     const backInner = `
       <div class="card-back-title">${badgeHtml} <span style="color:var(--small);font-weight:400;margin-left:6px;">rules</span></div>
@@ -202,14 +202,14 @@ export function renderDashboard() {
     return `
       <div class="card-stat has-back" data-card="${safeCard}" style="${colorVar}">
         <div class="card-faces">
-          <div class="card-face card-front" onclick="openTxnsForCard('${cardJs}')" title="View transactions on ${safeCard}">${frontInner}</div>
-          <div class="card-face card-back"  onclick="flipCard(this.closest('.card-stat'))" title="Tap to flip back">${backInner}</div>
+          <div class="card-face card-front" data-act="open-txns-card" data-card="${cardJs}" title="View transactions on ${safeCard}">${frontInner}</div>
+          <div class="card-face card-back"  data-act="flip-card" title="Tap to flip back">${backInner}</div>
         </div>
       </div>
     `;
   }).join('');
   const addTile = `
-    <div class="card-stat add-card-tile" onclick="openAddCardModal()" title="Add a new card">
+    <div class="card-stat add-card-tile" data-act="open-add-card" title="Add a new card">
       <div class="add-card-plus">＋</div>
       <div class="add-card-label">Add card</div>
     </div>
@@ -232,7 +232,7 @@ export function renderDashboard() {
     const tagText  = cat.fixed ? 'Fixed' : over ? 'Over' : warn ? 'Near limit' : 'On track';
     const catJs = cat.name.replace(/'/g, "\\'");
     return `
-      <div class="budget-item" style="--cat-color: ${cat.color || 'var(--border)'}; cursor: pointer;" onclick="openTxnsForCategory('${catJs}')" title="View ${escHtml(cat.name)} transactions">
+      <div class="budget-item" style="--cat-color: ${cat.color || 'var(--border)'}; cursor: pointer;" data-act="open-txns-cat" data-cat="${catJs}" title="View ${escHtml(cat.name)} transactions">
         <div class="budget-header">
           <div>
             <div class="budget-cat"><span class="budget-emoji">${cat.emoji}</span>${cat.name}</div>

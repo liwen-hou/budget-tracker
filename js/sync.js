@@ -205,7 +205,7 @@ export function renderSyncPanel(errorMsg) {
         <input type="text" id="syncGistIdInput" placeholder="paste gist ID to reconnect" autocomplete="off" autocapitalize="off" spellcheck="false">
       </div>
       <div style="display:flex;gap:10px;align-items:center;">
-        <button class="btn" onclick="connectSyncFromUI()">Connect</button>
+        <button class="btn" data-act="connect-sync">Connect</button>
         <span id="syncStatus" style="font-size:12px;color:${errorMsg ? 'var(--red)' : 'var(--muted)'};">${errorMsg || ''}</span>
       </div>
     `;
@@ -219,8 +219,8 @@ export function renderSyncPanel(errorMsg) {
         <div id="syncStatus" style="font-size:11px;color:${errorMsg ? 'var(--red)' : 'var(--muted)'};margin-top:2px;">${errorMsg ? '⚠️ ' + errorMsg : 'Last sync: ' + last}</div>
       </div>
       <div style="display:flex;gap:8px;">
-        <button class="btn" onclick="manualSync()">Sync now</button>
-        <button class="btn btn-outline" onclick="disconnectSyncFromUI()">Disconnect</button>
+        <button class="btn" data-act="manual-sync">Sync now</button>
+        <button class="btn btn-outline" data-act="disconnect-sync">Disconnect</button>
       </div>
     </div>
   `;

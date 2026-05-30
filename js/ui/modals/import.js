@@ -63,7 +63,7 @@ export function renderImportEntries() {
         <div class="import-entry-row${flags[i] ? ' is-duplicate' : ''}">
           <code class="import-entry-json">${escHtml(JSON.stringify(entry))}</code>
           ${flags[i] ? '<span class="import-entry-dup-badge" title="Same date, merchant, card, and amount as a saved transaction">Duplicate</span>' : ''}
-          <button class="import-entry-del" onclick="dropImportEntry(${i})" title="Remove">×</button>
+          <button class="import-entry-del" data-act="drop-import-entry" data-idx="${i}" title="Remove">×</button>
         </div>
       `).join('')}
     </div>

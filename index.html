@@ -17,37 +17,37 @@
 
 <!-- Floating actions — always reachable, kept out of the top bar -->
 <div class="fab-stack">
-  <button class="fab" id="analysisBtn" onclick="openAnalysisModal()" title="AI spending analysis" aria-label="AI spending analysis">✨</button>
-  <button class="fab privacy-fab" id="privacyBtn" onclick="togglePrivacy()" title="Privacy mode — blur all amounts" aria-label="Toggle privacy mode">👁️</button>
+  <button class="fab" id="analysisBtn" data-act="open-analysis" title="AI spending analysis" aria-label="AI spending analysis">✨</button>
+  <button class="fab privacy-fab" id="privacyBtn" data-act="toggle-privacy" title="Privacy mode — blur all amounts" aria-label="Toggle privacy mode">👁️</button>
 </div>
 
 <!-- Add Card modal -->
-<div class="overlay" id="addCardModal" style="display:none;" onclick="closeModalOutside(event, 'addCardModal')">
-  <div class="modal" onclick="event.stopPropagation()">
+<div class="overlay" id="addCardModal" style="display:none;">
+  <div class="modal">
     <h3>＋ Add a Card</h3>
     <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">New cards show up in the dashboard carousel, the Add Transaction form, the filter dropdown, and OCR card detection.</p>
     <div class="form-row">
       <label>Card name</label>
       <input type="text" id="newCardName" placeholder="e.g. UOB EVOL" maxlength="40" autocomplete="off"
-             onkeydown="if(event.key==='Enter')submitAddCard()">
+             data-enter-act="submit-add-card">
     </div>
     <div id="addCardErr" style="color:var(--red);font-size:12px;min-height:14px;margin-bottom:8px;"></div>
     <div class="modal-actions">
-      <button class="btn btn-outline" onclick="closeAddCardModal()">Cancel</button>
-      <button class="btn" onclick="submitAddCard()">Add card</button>
+      <button class="btn btn-outline" data-act="close-add-card">Cancel</button>
+      <button class="btn" data-act="submit-add-card">Add card</button>
     </div>
   </div>
 </div>
 
 <!-- AI Spending Analysis modal -->
-<div class="overlay" id="analysisModal" style="display:none;" onclick="closeModalOutside(event, 'analysisModal')">
-  <div class="modal" onclick="event.stopPropagation()">
+<div class="overlay" id="analysisModal" style="display:none;">
+  <div class="modal">
     <h3>✨ AI Spending Analysis</h3>
     <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">One-paragraph take on this month's pace and card caps. Uses your Anthropic API key.</p>
     <div class="analysis-body" id="analysisBody"></div>
     <div class="modal-actions">
-      <button class="btn btn-outline" onclick="closeAnalysisModal()">Close</button>
-      <button class="btn" id="analysisRegenBtn" onclick="generateSpendAnalysis()">Generate</button>
+      <button class="btn btn-outline" data-act="close-analysis">Close</button>
+      <button class="btn" id="analysisRegenBtn" data-act="generate-analysis">Generate</button>
     </div>
   </div>
 </div>
@@ -57,10 +57,10 @@
   <div class="lock-card">
     <h2 id="lockTitle">🔒 Unlock Budget Tracker</h2>
     <p id="lockHelp">Enter your passphrase to decrypt your data.</p>
-    <input type="password" id="lockPass1" autocomplete="current-password" placeholder="Passphrase" onkeydown="if(event.key==='Enter')submitLock()">
-    <input type="password" id="lockPass2" autocomplete="new-password" placeholder="Confirm passphrase" style="display:none;" onkeydown="if(event.key==='Enter')submitLock()">
+    <input type="password" id="lockPass1" autocomplete="current-password" placeholder="Passphrase" data-enter-act="submit-lock">
+    <input type="password" id="lockPass2" autocomplete="new-password" placeholder="Confirm passphrase" style="display:none;" data-enter-act="submit-lock">
     <div class="lock-err" id="lockErr"></div>
-    <button class="btn" id="lockBtn" onclick="submitLock()">Unlock</button>
+    <button class="btn" id="lockBtn" data-act="submit-lock">Unlock</button>
   </div>
 </div>
 
@@ -73,10 +73,10 @@
     <p>Liwen · Personal Finance</p>
   </div>
   <div class="nav-section">Overview</div>
-  <div class="nav-item active" onclick="showPage('dashboard', this)"><span style="font-size:18px;line-height:1">📊</span><span>Dashboard</span></div>
-  <div class="nav-item" onclick="showPage('transactions', this)"><span style="font-size:18px;line-height:1">📋</span><span>Transactions</span></div>
+  <div class="nav-item active" data-act="show-dashboard"><span style="font-size:18px;line-height:1">📊</span><span>Dashboard</span></div>
+  <div class="nav-item" data-act="show-transactions"><span style="font-size:18px;line-height:1">📋</span><span>Transactions</span></div>
   <div class="nav-section">Manage</div>
-  <div class="nav-item" onclick="showPage('settings', this)"><span style="font-size:18px;line-height:1">⚙️</span><span>Budgets</span></div>
+  <div class="nav-item" data-act="show-settings"><span style="font-size:18px;line-height:1">⚙️</span><span>Budgets</span></div>
 </div>
 
 <!-- Main -->
@@ -85,15 +85,15 @@
   <!-- Month bar (always visible) -->
   <div class="month-bar">
     <div class="month-nav">
-      <button class="btn-icon" onclick="changeMonth(-1)">‹</button>
-      <input type="month" class="month-picker" id="monthPicker" onchange="onMonthPickerChange()">
-      <button class="btn-icon" onclick="changeMonth(1)">›</button>
+      <button class="btn-icon" data-act="month-prev">‹</button>
+      <input type="month" class="month-picker" id="monthPicker" data-act="on-month-picker">
+      <button class="btn-icon" data-act="month-next">›</button>
     </div>
     <div class="btn-group" id="topActions">
-      <button class="btn btn-outline" onclick="openScanReceipt()">📄 Scan</button>
-      <button class="btn" onclick="openAddTxn()">＋ Add Transaction</button>
+      <button class="btn btn-outline" data-act="open-scan">📄 Scan</button>
+      <button class="btn" data-act="open-add-txn">＋ Add Transaction</button>
     </div>
-    <input type="file" id="ocrFileInput" accept="image/*,application/pdf" multiple style="display:none;" onchange="handleScannedReceipt(event)">
+    <input type="file" id="ocrFileInput" accept="image/*,application/pdf" multiple style="display:none;" data-act="on-scan-file">
   </div>
 
   <!-- DASHBOARD PAGE -->
@@ -117,12 +117,12 @@
         <div class="txn-total-label">Filtered total</div>
         <div class="txn-total-amount" id="txnTotalAmount">$0.00<span class="txn-total-count"> · 0 txns</span></div>
       </div>
-      <button class="btn btn-outline txn-enrich-btn" onclick="enrichTransactionsWithAI()" title="Ask Claude to fill in missing MCCs and verify categories on this month's transactions">✨ Enrich with AI</button>
+      <button class="btn btn-outline txn-enrich-btn" data-act="enrich-txns" title="Ask Claude to fill in missing MCCs and verify categories on this month's transactions">✨ Enrich with AI</button>
     </div>
     <div class="txn-filter-row">
-      <input id="txnSearch" type="text" placeholder="Search transactions…" oninput="renderTransactions()">
-      <select id="txnFilter" onchange="renderTransactions()"><option value="">All categories</option></select>
-      <select id="txnCardFilter" onchange="renderTransactions()"><option value="">All cards</option></select>
+      <input id="txnSearch" type="text" placeholder="Search transactions…" data-act="render-txns">
+      <select id="txnFilter" data-act="render-txns"><option value="">All categories</option></select>
+      <select id="txnCardFilter" data-act="render-txns"><option value="">All cards</option></select>
     </div>
     <div class="txn-list">
       <div class="txn-header">
@@ -142,7 +142,7 @@
           <div style="font-size:16px;font-weight:700;">✈️ Miles Tracker Settings</div>
           <div style="font-size:12px;color:var(--muted);margin-top:2px;">Thresholds and category mappings for all 4 cards.</div>
         </div>
-        <button class="btn" onclick="saveMilesSettings()">Save</button>
+        <button class="btn" data-act="save-miles-settings">Save</button>
       </div>
       <table class="settings-table">
         <tr><th>Tracker</th><th>Rule</th><th style="text-align:right">Threshold (SGD)</th></tr>
@@ -191,7 +191,7 @@
           <div style="font-size:16px;font-weight:700;">Monthly Budgets</div>
           <div style="font-size:12px;color:var(--muted);margin-top:2px;">Pre-filled from your expense analysis. Fixed costs are locked.</div>
         </div>
-        <button class="btn" onclick="saveBudgets()">Save Budgets</button>
+        <button class="btn" data-act="save-budgets">Save Budgets</button>
       </div>
       <table class="settings-table" id="settingsTable"></table>
     </div>
@@ -221,7 +221,7 @@
           <div style="font-size:16px;font-weight:700;">🔁 Recurring Transactions</div>
           <div style="font-size:12px;color:var(--muted);margin-top:2px;">Auto-added on the chosen day each month. Edit or delete the auto-added rows like any other txn — they won't reappear.</div>
         </div>
-        <button class="btn" onclick="openRecurringModal()">＋ Add Recurring</button>
+        <button class="btn" data-act="open-recurring">＋ Add Recurring</button>
       </div>
       <div id="recurringList"></div>
     </div>
@@ -233,7 +233,7 @@
           <div style="font-size:13px;font-weight:600;">App version</div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px;" id="appVersionLine">v<span id="appVersionText"></span> · tap refresh if iOS is showing an old build</div>
         </div>
-        <button class="btn btn-outline" onclick="manualRefreshApp()">↻ Check for update</button>
+        <button class="btn btn-outline" data-act="manual-refresh">↻ Check for update</button>
       </div>
     </div>
 
@@ -241,8 +241,8 @@
     <div class="card">
       <div style="font-size:15px;font-weight:700;margin-bottom:12px;">Danger Zone</div>
       <div style="display:flex;gap:10px;">
-        <button class="btn btn-outline" onclick="exportData()">Export JSON backup</button>
-        <button class="btn btn-danger" onclick="clearMonth()">Clear this month's transactions</button>
+        <button class="btn btn-outline" data-act="export-data">Export JSON backup</button>
+        <button class="btn btn-danger" data-act="clear-month">Clear this month's transactions</button>
       </div>
     </div>
   </div>
@@ -251,8 +251,8 @@
 </div>
 
 <!-- Add Transaction Modal -->
-<div class="overlay" id="addModal" style="display:none;" onclick="closeModalOutside(event, 'addModal')">
-  <div class="modal" onclick="event.stopPropagation()">
+<div class="overlay" id="addModal" style="display:none;">
+  <div class="modal">
     <h3 id="txnModalTitle">Add Transaction</h3>
     <div class="form-row">
       <label>Date</label>
@@ -279,20 +279,20 @@
       </div>
       <div class="form-row">
         <label>MCC <span style="color:var(--muted);font-weight:400;font-size:11px;">· optional, auto-suggests category</span></label>
-        <input type="text" id="txnMcc" placeholder="e.g. 5814" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" oninput="onMccInputChange()">
+        <input type="text" id="txnMcc" placeholder="e.g. 5814" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" data-act="on-mcc-input">
       </div>
     </div>
     <div id="txnMccHint" style="font-size:11px;color:var(--muted);margin-top:-8px;margin-bottom:12px;min-height:14px;"></div>
     <div class="modal-actions">
-      <button class="btn btn-outline" onclick="closeAddTxn()">Cancel</button>
-      <button class="btn" id="txnSaveBtn" onclick="saveTxn()">Add Transaction</button>
+      <button class="btn btn-outline" data-act="close-add-txn">Cancel</button>
+      <button class="btn" id="txnSaveBtn" data-act="save-txn">Add Transaction</button>
     </div>
   </div>
 </div>
 
 <!-- Recurring Transaction Modal -->
-<div class="overlay" id="recurringModal" style="display:none;" onclick="closeModalOutside(event, 'recurringModal')">
-  <div class="modal" onclick="event.stopPropagation()">
+<div class="overlay" id="recurringModal" style="display:none;">
+  <div class="modal">
     <h3 id="recurringModalTitle">Add Recurring Transaction</h3>
     <div class="form-row">
       <label>Merchant / Description</label>
@@ -319,15 +319,15 @@
       </div>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-outline" onclick="closeRecurringModal()">Cancel</button>
-      <button class="btn" id="recSaveBtn" onclick="saveRecurring()">Add</button>
+      <button class="btn btn-outline" data-act="close-recurring">Cancel</button>
+      <button class="btn" id="recSaveBtn" data-act="save-recurring">Add</button>
     </div>
   </div>
 </div>
 
 <!-- Import Modal -->
-<div class="overlay" id="importModal" style="display:none;" onclick="closeModalOutside(event, 'importModal')">
-  <div class="modal modal-wide" onclick="event.stopPropagation()">
+<div class="overlay" id="importModal" style="display:none;">
+  <div class="modal modal-wide">
     <h3>📥 Import Transactions</h3>
     <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
       Paste the JSON Claude sends you after reading your statement screenshot. Each transaction will be added to the current month (<strong id="importMonthLabel"></strong>).
@@ -342,13 +342,13 @@
     <div class="import-entries" id="importEntries" style="display:none;"></div>
     <div class="form-row">
       <label>Raw JSON (paste or edit)</label>
-      <textarea id="importJson" placeholder="[ ... ]" oninput="onImportJsonInput()"></textarea>
+      <textarea id="importJson" placeholder="[ ... ]" data-act="on-import-input"></textarea>
     </div>
     <div class="import-result" id="importResult"></div>
     <div class="modal-actions">
-      <button class="btn btn-outline" onclick="closeImport()">Cancel</button>
-      <button class="btn btn-outline" onclick="validateImport()">Validate</button>
-      <button class="btn" onclick="processImport()">Import All</button>
+      <button class="btn btn-outline" data-act="close-import">Cancel</button>
+      <button class="btn btn-outline" data-act="validate-import">Validate</button>
+      <button class="btn" data-act="process-import">Import All</button>
     </div>
   </div>
 </div>

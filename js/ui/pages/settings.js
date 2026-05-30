@@ -111,7 +111,7 @@ export function renderOcrPanel() {
         <label>Anthropic API key (sk-ant-…)</label>
         <input type="password" id="ocrApiKeyInput" placeholder="sk-ant-..." autocomplete="off">
       </div>
-      <button class="btn" onclick="saveOcrKeyFromUI()">Save Key</button>
+      <button class="btn" data-act="save-ocr-key">Save Key</button>
     `;
     return;
   }
@@ -119,7 +119,7 @@ export function renderOcrPanel() {
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
       <div style="font-size:13px;">Saved key · <code style="font-size:11px;">${masked}</code></div>
-      <button class="btn btn-outline" onclick="clearOcrKeyFromUI()">Remove Key</button>
+      <button class="btn btn-outline" data-act="clear-ocr-key">Remove Key</button>
     </div>
   `;
 }

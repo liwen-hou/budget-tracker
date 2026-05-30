@@ -121,8 +121,8 @@ export function renderRecurringList() {
             <div style="font-size:11px;color:var(--muted);margin-top:2px;">${cat?.emoji||''} ${r.category} · ${r.card} · day ${r.day}</div>
           </div>
           <div style="font-weight:700;white-space:nowrap;">$${fmt(r.amount)}</div>
-          <button class="btn-edit" onclick="openRecurringModal('${r.id}')" title="Edit">✎</button>
-          <button class="btn-del" onclick="if(confirm('Delete recurring &quot;${escHtml(r.merchant)}&quot;? Past auto-added rows are kept.')) deleteRecurring('${r.id}')" title="Delete">✕</button>
+          <button class="btn-edit" data-act="open-recurring" data-id="${r.id}" title="Edit">✎</button>
+          <button class="btn-del" data-act="delete-recurring" data-id="${r.id}" data-merchant="${escHtml(r.merchant)}" title="Delete">✕</button>
         </div>`;
       }).join('')}
     </div>
