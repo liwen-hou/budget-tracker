@@ -5,16 +5,26 @@
 import { CATEGORIES, MCC_LOOKUP } from '../../config.js';
 import { fmt } from '../../utils.js';
 import { state } from '../../state.js';
-import { storageKey } from '../../storage.js';
+import { storageKey, bucketKeyFromDate } from '../../storage.js';
 
 let editingTxnId = null;
 
 let _ctx = {
-  saveTransactions: () => {},
+  saveTransactionsBucket: (_key) => {},  // accepts a specific bucket key
+  monthLabelOfKey: (_key) => '',         // for the cross-bucket "Moved to X" toast
   renderAll: () => {},
   toast: () => {},
 };
 export function setAddTxnContext(ctx) { _ctx = { ..._ctx, ...ctx }; }
+
+// Bucket a txn by its date field. Falls back to the currently-viewed month
+// only when the date is malformed/missing (logs a warning so we notice).
+function bucketKeyForTxn(t) {
+  const key = bucketKeyFromDate(t.date);
+  if (key) return key;
+  console.warn('add-txn: malformed date, falling back to current view bucket', t.date);
+  return storageKey(state.currentYear, state.currentMonth);
+}
 
 export function populateTxnCategorySelect() {
   document.getElementById('txnCategory').innerHTML =
@@ -99,15 +109,33 @@ export function saveTxn() {
   const mcc = mccRaw || undefined;
 
   if (editingTxnId) {
-    const key = storageKey(state.currentYear, state.currentMonth);
-    const list = state.transactions[key] || [];
+    // The row lives in whichever bucket the user is currently viewing — the
+    // edit modal was opened from a row that renderTransactions emitted from
+    // state.transactions[currentBucket]. If the new date is in a different
+    // calendar month, move the row across buckets and persist both sides.
+    const oldKey = storageKey(state.currentYear, state.currentMonth);
+    const newKey = bucketKeyForTxn({ date });
+    const list = state.transactions[oldKey] || [];
     const idx = list.findIndex(x => x.id === editingTxnId);
     if (idx < 0) { _ctx.toast('Transaction not found'); return; }
-    list[idx] = { ...list[idx], date, merchant, category, card, amount, mcc };
-    _ctx.saveTransactions();
-    closeAddTxn();
-    _ctx.renderAll();
-    _ctx.toast('Transaction updated ✓');
+    const updated = { ...list[idx], date, merchant, category, card, amount, mcc };
+
+    if (newKey === oldKey) {
+      list[idx] = updated;
+      _ctx.saveTransactionsBucket(oldKey);
+      closeAddTxn();
+      _ctx.renderAll();
+      _ctx.toast('Transaction updated ✓');
+    } else {
+      list.splice(idx, 1);
+      if (!state.transactions[newKey]) state.transactions[newKey] = [];
+      state.transactions[newKey].push(updated);
+      _ctx.saveTransactionsBucket(oldKey);
+      _ctx.saveTransactionsBucket(newKey);
+      closeAddTxn();
+      _ctx.renderAll();
+      _ctx.toast(`Moved to ${_ctx.monthLabelOfKey(newKey)} ✓`);
+    }
     return;
   }
 
@@ -118,10 +146,10 @@ export function saveTxn() {
 }
 
 export function addTxnToStore(t) {
-  const key = storageKey(state.currentYear, state.currentMonth);
+  const key = bucketKeyForTxn(t);
   if (!state.transactions[key]) state.transactions[key] = [];
   const row = { id: Date.now().toString() + Math.random().toString(36).slice(2), date: t.date, merchant: t.merchant, category: t.category, card: t.card, amount: t.amount };
   if (t.mcc) row.mcc = String(t.mcc);
   state.transactions[key].push(row);
-  _ctx.saveTransactions();
+  _ctx.saveTransactionsBucket(key);
 }

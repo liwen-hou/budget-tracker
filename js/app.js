@@ -19,9 +19,10 @@
 // and js/ui/{lock,modals/*}.js.
 
 import {
-  // Storage key naming
+  // Storage key naming + bucketing
   storageKey, budgetKey, milesKey, recurringKey, recurringAppliedKey,
   ocrConfigKey, cardsKey, cardOrderKey, milesOrderKey, monthKeyOf,
+  rebucketAllTransactions, BUCKETING_MIGRATION_V1,
   // Encryption-at-rest
   origGetItem, origSetItem, PRIVACY_PREF_KEY,
   installStorageOverride, decryptAllToCache, restoreSessionKey,
@@ -523,6 +524,7 @@ function applyRecurringForMonth(y, m) {
 
 function loadData() {
   migrateStoredCategories();
+  maybeRunBucketingMigration();
 
   // Auto-apply recurring for the month we're about to render
   applyRecurringForMonth(state.currentYear, state.currentMonth);
@@ -543,8 +545,25 @@ function loadData() {
   else state.transactions[key] = [];
 }
 
+// One-time per-device migration: re-files any txn whose date.slice(0,7)
+// disagrees with its bucket key. Gated by a localStorage flag so it doesn't
+// re-scan every boot. Sync-apply runs the same re-bucket pass unconditionally.
+function maybeRunBucketingMigration() {
+  if (localStorage.getItem(BUCKETING_MIGRATION_V1) === '1') return;
+  const { moved, scanned } = rebucketAllTransactions();
+  localStorage.setItem(BUCKETING_MIGRATION_V1, '1');
+  if (moved > 0) {
+    console.log(`bucketing migration v1: re-filed ${moved} of ${scanned} transaction(s)`);
+  }
+}
+
 function saveTransactions() {
-  const key = storageKey(state.currentYear, state.currentMonth);
+  saveTransactionsBucket(storageKey(state.currentYear, state.currentMonth));
+}
+
+// Persist a specific bucket. Used by addTxnToStore + the cross-bucket edit
+// path, which both need to write a non-current-view bucket.
+function saveTransactionsBucket(key) {
   localStorage.setItem(key, JSON.stringify(state.transactions[key] || []));
   triggerSyncPush();
 }
@@ -696,7 +715,13 @@ setRecurringContext({
   toast: (msg) => toast(msg),
 });
 setAddTxnContext({
-  saveTransactions: () => saveTransactions(),
+  saveTransactionsBucket: (key) => saveTransactionsBucket(key),
+  monthLabelOfKey: (key) => {
+    // key is "txns_YYYY_MM" → return e.g. "June 2026"
+    const m = key.match(/^txns_(\d{4})_(\d{2})$/);
+    if (!m) return key;
+    return new Date(+m[1], +m[2] - 1, 1).toLocaleString('en-SG', { month: 'long', year: 'numeric' });
+  },
   renderAll: () => renderAll(),
   toast: (msg) => toast(msg),
 });

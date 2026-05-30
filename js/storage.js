@@ -27,6 +27,60 @@ export function cardOrderKey()        { return 'card_order_liwen'; }
 export function milesOrderKey()       { return 'miles_order_liwen'; }
 export function monthKeyOf(y, m)      { return `${y}_${String(m + 1).padStart(2, '0')}`; }
 
+// Derive the bucket key (`txns_YYYY_MM`) from a transaction's date field.
+// Accepts "YYYY-MM-DD" and "YYYY-MM-DD…" (e.g. ISO timestamps). Returns null
+// if the date is missing or malformed — callers decide the fallback policy.
+export function bucketKeyFromDate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const m = dateStr.slice(0, 7).match(/^(\d{4})-(\d{2})$/);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  if (y < 1900 || y > 9999 || mo < 1 || mo > 12) return null;
+  return `txns_${m[1]}_${m[2]}`;
+}
+
+// Sweep every txns_* bucket and re-file any rows whose date.slice(0,7)
+// doesn't match the bucket they're in. Uses the regular getItem/setItem so
+// the encryption layer round-trips correctly. Returns { moved, scanned }.
+// Called from:
+//   1. loadData() once at app boot, gated by the BUCKETING_MIGRATION_V1 flag
+//   2. applySyncPayload() after every gist pull, so mis-bucketed data from
+//      another device (or an older client) gets corrected on receive
+export function rebucketAllTransactions() {
+  const txnKeys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('txns_')) txnKeys.push(k);
+  }
+  let moved = 0, scanned = 0;
+  txnKeys.forEach(key => {
+    let bucket;
+    try { bucket = JSON.parse(localStorage.getItem(key) || '[]'); } catch { return; }
+    if (!Array.isArray(bucket)) return;
+    scanned += bucket.length;
+    const keep = [];
+    bucket.forEach(t => {
+      const correctKey = bucketKeyFromDate(t.date);
+      if (!correctKey || correctKey === key) {
+        keep.push(t);
+        return;
+      }
+      let target;
+      try { target = JSON.parse(localStorage.getItem(correctKey) || '[]'); } catch { target = []; }
+      target.push(t);
+      localStorage.setItem(correctKey, JSON.stringify(target));
+      moved++;
+    });
+    if (keep.length < bucket.length) {
+      localStorage.setItem(key, JSON.stringify(keep));
+    }
+  });
+  return { moved, scanned };
+}
+
+export const BUCKETING_MIGRATION_V1 = 'bucketing_migration_v1_done';
+
 // ─── Encryption-at-rest (S5/S6) ──────────────────────────────────────────────
 // AES-GCM with a key derived (PBKDF2/SHA-256, 250k iters) from a user passphrase.
 // All transaction + config + credential keys are stored encrypted in localStorage,

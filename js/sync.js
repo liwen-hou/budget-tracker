@@ -15,7 +15,7 @@ import {
   encryptString, decryptString, deriveMasterKey,
   loadEncMeta, adoptRemoteEncryption, currentPassphrase,
   syncConfigKey, budgetKey, milesKey, recurringKey, recurringAppliedKey,
-  cardsKey, cardOrderKey, milesOrderKey,
+  cardsKey, cardOrderKey, milesOrderKey, rebucketAllTransactions,
 } from './storage.js';
 
 const SYNC_FILE = 'budget-tracker.json';
@@ -100,6 +100,11 @@ async function applySyncPayload(env) {
   }
   toRemove.forEach(k => localStorage.removeItem(k));
   Object.entries(data).forEach(([k, v]) => localStorage.setItem(k, JSON.stringify(v)));
+  // Re-file any rows whose date.slice(0,7) disagrees with the bucket the
+  // pushing device used. Without this, mis-bucketed data from an older
+  // client (or a buggy device) would re-corrupt this device on every pull.
+  const { moved } = rebucketAllTransactions();
+  if (moved > 0) console.log(`sync apply: re-bucketed ${moved} transaction(s) by date`);
 }
 
 async function gistApi(method, path, body) {
