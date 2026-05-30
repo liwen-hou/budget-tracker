@@ -67,6 +67,28 @@ import {
   openAddTxn, openEditTxn, closeAddTxn, saveTxn, addTxnToStore,
   populateTxnCategorySelect, onMccInputChange, setAddTxnContext,
 } from './ui/modals/add-txn.js';
+import { toast, closeModalOutside } from './ui/toast.js';
+import { loadPrivacyPref, savePrivacyPref, applyPrivacyPref, togglePrivacy } from './ui/privacy.js';
+import {
+  initMonth, syncMonthPicker, changeMonth, onMonthPickerChange, monthLabel,
+  setMonthBarContext,
+} from './ui/month-bar.js';
+import {
+  loadCustomCards, saveCustomCards, loadCardOrder, saveCardOrder,
+  loadMilesOrder, saveMilesOrder, nextCustomColor, refreshCards,
+  cardBadgeStyle, populateCardSelects,
+} from './ui/cards.js';
+import {
+  flipCard, openTxnsForCard, openTxnsForCategory,
+  setupCardReorder, setupMilesReorder, setCarouselContext,
+} from './ui/carousel.js';
+import { renderDashboard, setDashboardContext } from './ui/pages/dashboard.js';
+import { renderTransactions, deleteTxn, setTransactionsContext } from './ui/pages/transactions.js';
+import {
+  renderSettings, renderMilesSettings, saveBudgets, saveMilesSettings,
+  loadOcrConfig, saveOcrKeyFromUI, clearOcrKeyFromUI, renderOcrPanel,
+  setSettingsContext,
+} from './ui/pages/settings.js';
 
 
 
@@ -103,61 +125,6 @@ function getMissedBonus(t) {
   return null;
 }
 
-function loadCustomCards() {
-  try { return JSON.parse(localStorage.getItem(cardsKey()) || '[]'); } catch (e) { return []; }
-}
-function saveCustomCards(list) { localStorage.setItem(cardsKey(), JSON.stringify(list)); triggerSyncPush(); }
-function loadCardOrder() {
-  try { return JSON.parse(localStorage.getItem(cardOrderKey()) || '[]'); } catch (e) { return []; }
-}
-function saveCardOrder(order) { localStorage.setItem(cardOrderKey(), JSON.stringify(order)); triggerSyncPush(); }
-function loadMilesOrder() {
-  try { return JSON.parse(localStorage.getItem(milesOrderKey()) || '[]'); } catch (e) { return []; }
-}
-function saveMilesOrder(order) { localStorage.setItem(milesOrderKey(), JSON.stringify(order)); triggerSyncPush(); }
-function nextCustomColor() {
-  const used = Object.values(state.cardColor);
-  return CUSTOM_CARD_PALETTE.find(c => !used.includes(c)) || CUSTOM_CARD_PALETTE[0];
-}
-function refreshCards() {
-  const custom = loadCustomCards();
-  // Build the universe of available card names (defaults + custom, dedup)
-  const universe = [...DEFAULT_CARDS];
-  custom.forEach(c => { if (c?.name && !universe.includes(c.name)) universe.push(c.name); });
-  // Apply saved order on top: existing names in saved order first, then any new ones
-  const saved = loadCardOrder();
-  const ordered = [];
-  saved.forEach(n => { if (universe.includes(n)) ordered.push(n); });
-  universe.forEach(n => { if (!ordered.includes(n)) ordered.push(n); });
-  state.cards = ordered;
-  // Colour map (defaults override saved custom colours so brand colours stay stable)
-  state.cardColor = {...DEFAULT_CARD_COLOR};
-  custom.forEach(c => { if (c?.name && !state.cardColor[c.name]) state.cardColor[c.name] = c.color || nextCustomColor(); });
-  state.validCards = new Set(state.cards);
-}
-// Inline-style fallback for badges of cards that don't have a preset CSS class
-// (i.e. user-added custom cards). Returns empty string for built-in cards.
-function cardBadgeStyle(card) {
-  if (CARD_CLASS[card]) return '';
-  const color = state.cardColor[card] || '#7b809a';
-  return `style="background: color-mix(in srgb, ${color} 18%, transparent); color: ${color};"`;
-}
-function populateCardSelects() {
-  const opts = state.cards.map(c => `<option value="${c}">${c}</option>`).join('');
-  ['txnCard', 'recCard'].forEach(id => {
-    const sel = document.getElementById(id);
-    if (!sel) return;
-    const cur = sel.value;
-    sel.innerHTML = opts;
-    if (cur && state.cards.includes(cur)) sel.value = cur;
-  });
-  const fil = document.getElementById('txnCardFilter');
-  if (fil) {
-    const cur = fil.value;
-    fil.innerHTML = '<option value="">All cards</option>' + opts;
-    if (cur === '' || state.cards.includes(cur)) fil.value = cur;
-  }
-}
 
 
 // State
@@ -165,28 +132,6 @@ function populateCardSelects() {
 
 
 
-// ─── Privacy mode (S7) ───────────────────────────────────────────────────────
-function loadPrivacyPref() { return origGetItem.call(localStorage, PRIVACY_PREF_KEY) === '1'; }
-function savePrivacyPref(on) { origSetItem.call(localStorage, PRIVACY_PREF_KEY, on ? '1' : '0'); }
-function applyPrivacyPref() {
-  const on = loadPrivacyPref();
-  document.body.classList.toggle('privacy-on', on);
-  const btn = document.getElementById('privacyBtn');
-  if (btn) {
-    btn.textContent = on ? '🙈' : '👁️';
-    btn.classList.toggle('active', on);
-    btn.title = on ? 'Privacy mode ON — tap to reveal amounts' : 'Privacy mode — blur all amounts';
-  }
-}
-function togglePrivacy() {
-  const next = !loadPrivacyPref();
-  savePrivacyPref(next);
-  applyPrivacyPref();
-  toast(next ? '🙈 Amounts blurred' : '👁️ Amounts visible');
-}
-document.addEventListener('visibilitychange', () => {
-  document.body.classList.toggle('tab-hidden', document.hidden);
-});
 
 // ─── Receipt OCR (orchestration) ─────────────────────────────────────────────
 // Pure Claude API calls live in js/api/{ocr,enrich,analysis}.js. The wrappers
@@ -248,48 +193,6 @@ async function manualRefreshApp() {
   }
 }
 
-function loadOcrConfig() {
-  try { return JSON.parse(localStorage.getItem(ocrConfigKey()) || '{}'); } catch (e) { return {}; }
-}
-function saveOcrConfig(cfg) { localStorage.setItem(ocrConfigKey(), JSON.stringify(cfg)); }
-
-function saveOcrKeyFromUI() {
-  const k = document.getElementById('ocrApiKeyInput')?.value?.trim();
-  if (!k) { toast('Paste an API key first'); return; }
-  saveOcrConfig({ apiKey: k });
-  renderOcrPanel();
-  toast('API key saved ✓');
-}
-
-function clearOcrKeyFromUI() {
-  if (!confirm('Remove the saved Anthropic API key from this device?')) return;
-  saveOcrConfig({});
-  renderOcrPanel();
-  toast('API key removed');
-}
-
-function renderOcrPanel() {
-  const el = document.getElementById('ocrPanel');
-  if (!el) return;
-  const cfg = loadOcrConfig();
-  if (!cfg.apiKey) {
-    el.innerHTML = `
-      <div class="form-row">
-        <label>Anthropic API key (sk-ant-…)</label>
-        <input type="password" id="ocrApiKeyInput" placeholder="sk-ant-..." autocomplete="off">
-      </div>
-      <button class="btn" onclick="saveOcrKeyFromUI()">Save Key</button>
-    `;
-    return;
-  }
-  const masked = cfg.apiKey.slice(0, 7) + '…' + cfg.apiKey.slice(-4);
-  el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-      <div style="font-size:13px;">Saved key · <code style="font-size:11px;">${masked}</code></div>
-      <button class="btn btn-outline" onclick="clearOcrKeyFromUI()">Remove Key</button>
-    </div>
-  `;
-}
 
 function openScanReceipt() {
   const cfg = loadOcrConfig();
@@ -350,7 +253,7 @@ async function enrichTransactionsWithAI() {
   }
 
   const txns = currentTxns();
-  if (txns.length === 0) { toast('No state.transactions in this month to enrich'); return; }
+  if (txns.length === 0) { toast('No transactions in this month to enrich'); return; }
 
   const missingMcc = txns.filter(t => !t.mcc).length;
   const ok = confirm(
@@ -362,7 +265,7 @@ async function enrichTransactionsWithAI() {
   );
   if (!ok) return;
 
-  toast(`Asking Claude to review ${txns.length} state.transactions…`);
+  toast(`Asking Claude to review ${txns.length} transactions…`);
 
   let patches;
   try {
@@ -416,218 +319,9 @@ async function enrichTransactionsWithAI() {
   toast(parts.length ? `Enriched — ${parts.join(', ')}` : 'Reviewed — nothing needed changing');
 }
 
-// ─── AI Spending Analysis ────────────────────────────────────────────────────
 
-// Build a combined data summary for one card — overall total + any miles
-// caps that apply. Used by the dashboard card carousel (formerly two
-// separate sections — "Spending by Card" and "Miles Promo Tracker" —
-// now folded into one tile per card with a flip face for the rules).
-function cardData(card, txns, cardTotals) {
-  const cardTxns = txns.filter(t => t.card === card);
-  const total = (cardTotals && cardTotals[card]) || 0;
-  const miles = [];
 
-  if (card === 'HSBC Revolution') {
-    miles.push({
-      label: 'Monthly bonus cap',
-      shortLabel: 'Monthly cap',
-      spent: total,
-      cap: state.milesConfig.hsbc,
-      rate: '4 mpd',
-      note: 'Counts contactless + online spend (dining, shopping, transport, subscriptions). Excludes SimplyGo, fast-food delivery, and OTAs.',
-    });
-  } else if (card === "UOB Lady's") {
-    const fashionSet = new Set(state.milesConfig.fashionCats || []);
-    const diningSet  = new Set(state.milesConfig.diningCats || []);
-    const fashionSpent = cardTxns.filter(t => fashionSet.has(t.category)).reduce((s,t)=>s+t.amount, 0);
-    const diningSpent  = cardTxns.filter(t => diningSet.has(t.category)).reduce((s,t)=>s+t.amount, 0);
-    miles.push({
-      label: 'Fashion bonus',
-      shortLabel: 'Fashion',
-      spent: fashionSpent,
-      cap: state.milesConfig.uobLadyFashion,
-      rate: '4 mpd',
-      note: 'Counts UOB Lady\'s spend in: ' + (state.milesConfig.fashionCats || []).join(', '),
-    });
-    miles.push({
-      label: 'Dining bonus',
-      shortLabel: 'Dining',
-      spent: diningSpent,
-      cap: state.milesConfig.uobLadyDining,
-      rate: '4 mpd',
-      note: 'Counts UOB Lady\'s spend in: ' + (state.milesConfig.diningCats || []).join(', '),
-    });
-  } else if (card === 'UOB KrisFlyer') {
-    const ytd = getKrisFlyerYTD();
-    miles.push({
-      label: 'Annual SIA Group min',
-      shortLabel: 'Annual SIA',
-      spent: ytd,
-      cap: state.milesConfig.kfAnnual,
-      rate: '3 mpd on SQ/Scoot',
-      note: 'Tracks all UOB KrisFlyer card spend Jan–Dec. Must hit $' + fmt(state.milesConfig.kfAnnual) + '/year to unlock the 2.4 mpd bonus tier on other spend.',
-    });
-  }
-  // DBS Vantage, Cash, custom cards — no miles tracking → no flip.
 
-  return { card, total, txnCount: cardTxns.length, miles };
-}
-
-function renderMilesRow(m) {
-  const pct = m.cap > 0 ? Math.min(m.spent / m.cap, 1) : 0;
-  const hit = m.spent >= m.cap;
-  const close = !hit && m.spent >= m.cap * 0.75;
-  const barClass = hit ? 'green' : close ? 'orange' : 'red';
-  return `
-    <div class="card-miles-row">
-      <div class="card-miles-label">
-        <span>${m.shortLabel}</span>
-        <span class="card-miles-amounts">$${fmt(m.spent)} / $${fmt(m.cap)}</span>
-      </div>
-      <div class="card-miles-track"><div class="card-miles-bar ${barClass}" style="width:${(pct*100).toFixed(1)}%"></div></div>
-    </div>
-  `;
-}
-
-// Suppress the click that follows a long-press drag, so reordering a card
-// doesn't also flip it or jump to Transactions.
-let _recentlyReordered = false;
-function flipCard(el) {
-  if (_recentlyReordered) return;
-  if (!el.classList.contains('has-back')) return;
-  el.classList.toggle('flipped');
-}
-
-// Navigate to the Transactions page with a single filter applied.
-function _navToTransactionsWithFilter({ card = '', category = '' } = {}) {
-  if (_recentlyReordered) return;
-  // Make sure the Category select has its options before we set a value
-  // (renderTransactions used to populate them lazily on first render).
-  const catEl    = document.getElementById('txnFilter');
-  const cardEl   = document.getElementById('txnCardFilter');
-  const searchEl = document.getElementById('txnSearch');
-  if (catEl && catEl.options.length <= 1) {
-    CATEGORIES.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c.name; opt.textContent = c.name;
-      catEl.appendChild(opt);
-    });
-  }
-  if (catEl)    catEl.value    = category;
-  if (cardEl)   cardEl.value   = card;
-  if (searchEl) searchEl.value = '';
-  const navTx = Array.from(document.querySelectorAll('.nav-item'))
-    .find(n => /showPage\('transactions'/.test(n.getAttribute('onclick') || ''));
-  showPage('transactions', navTx);
-}
-function openTxnsForCard(card)    { _navToTransactionsWithFilter({ card }); }
-function openTxnsForCategory(cat) { _navToTransactionsWithFilter({ category: cat }); }
-
-// Generic long-press drag-to-reorder for a horizontal carousel.
-// dragSelector: which tiles are draggable (e.g. ".card-stat:not(.add-card-tile)").
-// pinnedSelector (optional): a tile that stays at the end (e.g. the + Add tile);
-// dragged items are kept in front of it.
-// idAttr: dataset key to read the stable id from each tile (e.g. "card" → data-card).
-// commit(newOrder): called with the post-drag string id list to persist.
-function setupCarouselReorder({ containerId, dragSelector, pinnedSelector, idAttr, commit }) {
-  const container = document.getElementById(containerId);
-  if (!container || container.dataset.reorderBound === '1') return;
-  container.dataset.reorderBound = '1';
-
-  const LONG_PRESS_MS = 400;
-  const CANCEL_MOVE_PX = 8;
-  let pressTimer = null;
-  let dragging = null;
-  let startX = 0, startY = 0;
-  let pointerId = null;
-
-  container.addEventListener('pointerdown', (e) => {
-    const tile = e.target.closest(dragSelector);
-    if (!tile || !container.contains(tile)) return;
-    startX = e.clientX; startY = e.clientY;
-    pointerId = e.pointerId;
-    pressTimer = setTimeout(() => {
-      pressTimer = null;
-      dragging = tile;
-      tile.classList.add('dragging');
-      container.classList.add('reordering');
-      container.style.scrollSnapType = 'none';
-      try { tile.setPointerCapture(pointerId); } catch (_) {}
-      if (navigator.vibrate) navigator.vibrate(12);
-    }, LONG_PRESS_MS);
-  });
-
-  container.addEventListener('pointermove', (e) => {
-    if (pressTimer && Math.hypot(e.clientX - startX, e.clientY - startY) > CANCEL_MOVE_PX) {
-      clearTimeout(pressTimer); pressTimer = null;
-    }
-    if (!dragging) return;
-    e.preventDefault();
-    const siblings = Array.from(container.querySelectorAll(dragSelector));
-    let insertBefore = null;
-    for (const s of siblings) {
-      if (s === dragging) continue;
-      const r = s.getBoundingClientRect();
-      if (e.clientX < r.left + r.width / 2) { insertBefore = s; break; }
-    }
-    const pinned = pinnedSelector ? container.querySelector(pinnedSelector) : null;
-    if (insertBefore) {
-      if (dragging.nextElementSibling !== insertBefore) container.insertBefore(dragging, insertBefore);
-    } else if (pinned) {
-      if (dragging.nextElementSibling !== pinned) container.insertBefore(dragging, pinned);
-    } else if (container.lastElementChild !== dragging) {
-      container.appendChild(dragging);
-    }
-  });
-
-  const endDrag = () => {
-    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
-    if (!dragging) return;
-    dragging.classList.remove('dragging');
-    container.classList.remove('reordering');
-    container.style.scrollSnapType = '';
-    const newOrder = Array.from(container.querySelectorAll(dragSelector))
-      .map(t => t.dataset[idAttr])
-      .filter(Boolean);
-    commit(newOrder);
-    // Block the click that's about to fire so we don't flip the card we
-    // just dropped.
-    _recentlyReordered = true;
-    setTimeout(() => { _recentlyReordered = false; }, 250);
-    dragging = null;
-  };
-  container.addEventListener('pointerup',     endDrag);
-  container.addEventListener('pointercancel', endDrag);
-}
-
-function setupCardReorder() {
-  setupCarouselReorder({
-    containerId: 'cardBreakdown',
-    dragSelector: '.card-stat:not(.add-card-tile)',
-    pinnedSelector: '.add-card-tile',
-    idAttr: 'card',
-    commit: (order) => {
-      const prev = loadCardOrder();
-      if (JSON.stringify(prev) === JSON.stringify(order)) return;
-      saveCardOrder(order);
-      refreshCards();
-    },
-  });
-}
-
-function setupMilesReorder() {
-  setupCarouselReorder({
-    containerId: 'milesGrid',
-    dragSelector: '.miles-card',
-    pinnedSelector: null,
-    idAttr: 'milesId',
-    commit: (order) => {
-      const prev = loadMilesOrder();
-      if (JSON.stringify(prev) === JSON.stringify(order)) return;
-      saveMilesOrder(order);
-    },
-  });
-}
 
 
 
@@ -859,41 +553,6 @@ function currentTxns() {
   return state.transactions[storageKey(state.currentYear, state.currentMonth)] || [];
 }
 
-// ─── Month navigation ────────────────────────────────────────────────────────
-function initMonth() {
-  const now = new Date();
-  state.currentYear = now.getFullYear();
-  state.currentMonth = now.getMonth();
-}
-
-function syncMonthPicker() {
-  const el = document.getElementById('monthPicker');
-  if (el) el.value = `${state.currentYear}-${String(state.currentMonth+1).padStart(2,'0')}`;
-}
-
-function changeMonth(delta) {
-  state.currentMonth += delta;
-  if (state.currentMonth > 11) { state.currentMonth = 0; state.currentYear++; }
-  if (state.currentMonth < 0)  { state.currentMonth = 11; state.currentYear--; }
-  syncMonthPicker();
-  loadData();
-  renderAll();
-}
-
-function onMonthPickerChange() {
-  const v = document.getElementById('monthPicker').value;
-  if (!v) return;
-  const [y, m] = v.split('-').map(Number);
-  if (!y || !m) return;
-  state.currentYear = y;
-  state.currentMonth = m - 1;
-  loadData();
-  renderAll();
-}
-
-function monthLabel() {
-  return new Date(state.currentYear, state.currentMonth, 1).toLocaleString('en-SG', { month: 'long', year: 'numeric' });
-}
 
 // ─── Pages ───────────────────────────────────────────────────────────────────
 function showPage(name, el) {
@@ -911,440 +570,15 @@ function showPage(name, el) {
   if (name === 'dashboard') renderDashboard();
 }
 
-// ─── Dashboard ───────────────────────────────────────────────────────────────
 
 
-function renderDashboard() {
-  syncMonthPicker();
-  const txns = currentTxns();
-  const totalSpent = txns.reduce((s, t) => s + t.amount, 0);
-  const totalBudget = Object.values(state.budgets).reduce((s, v) => s + v, 0);
-  const remaining = totalBudget - totalSpent;
-  const pct = totalBudget > 0 ? totalSpent / totalBudget : 0;
-
-  const prev = previousMonthData({ year: state.currentYear, month: state.currentMonth });
-
-  const days = new Date(state.currentYear, state.currentMonth + 1, 0).getDate();
-  const today = new Date();
-  const dayOfMonth = (today.getFullYear() === state.currentYear && today.getMonth() === state.currentMonth)
-    ? today.getDate() : days;
-  const dailyAvg = dayOfMonth > 0 ? totalSpent / dayOfMonth : 0;
-  const projected = dailyAvg * days;
-
-  // Vibe — based on projected pace (more honest than raw spent so far)
-  const pace = totalBudget > 0 ? projected / totalBudget : 0;
-  const vibe = pace < 0.85 ? { emoji: '😎', cls: 'vibe-good',   verdict: 'Well under', ring: 'good' }
-            : pace < 1.0  ? { emoji: '🙂', cls: 'vibe-fine',   verdict: 'On pace',    ring: 'good' }
-            : pace < 1.15 ? { emoji: '😬', cls: 'vibe-tight',  verdict: 'Tight',      ring: 'warn' }
-            :               { emoji: '🔥', cls: 'vibe-danger', verdict: 'Over',       ring: 'over' };
-
-  // Ring arc values (path normalised to 100 via pathLength)
-  const spentArc = Math.max(0, Math.min(100, pct * 100));     // capped visually
-  const dayArc   = days > 0 ? (dayOfMonth / days) * 100 : 0;
-
-  // Hero — big ring + center stack
-  document.getElementById('heroRing').innerHTML = `
-    <svg class="hero-ring-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="ringGoodGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#10b981" /><stop offset="100%" stop-color="#34d399" />
-        </linearGradient>
-        <linearGradient id="ringWarnGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#f59e0b" /><stop offset="100%" stop-color="#fbbf24" />
-        </linearGradient>
-        <linearGradient id="ringOverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#dc2626" /><stop offset="100%" stop-color="#f87171" />
-        </linearGradient>
-      </defs>
-      <g transform="rotate(-90 50 50)">
-        <circle class="ring-track-day"  cx="50" cy="50" r="46" />
-        <circle class="ring-arc-day"    cx="50" cy="50" r="46" pathLength="100"
-                stroke-dasharray="0 100" data-target="${dayArc.toFixed(2)}" />
-        <circle class="ring-track-main" cx="50" cy="50" r="38" />
-        <circle class="ring-arc-main ${vibe.ring}" cx="50" cy="50" r="38" pathLength="100"
-                stroke-dasharray="0 100" data-target="${spentArc.toFixed(2)}" />
-      </g>
-    </svg>
-    <div class="hero-center">
-      <div class="hero-day">Day ${dayOfMonth} of ${days}</div>
-      <div class="hero-vibe ${vibe.cls}"><span class="hero-vibe-emoji">${vibe.emoji}</span> ${vibe.verdict}</div>
-      <div class="hero-amount ${pct > 1 ? 'red' : pct > 0.8 ? 'orange' : 'green'}">$${fmt(totalSpent)}</div>
-      <div class="hero-divider"></div>
-      <div class="hero-of">of $${fmt(totalBudget)}</div>
-      <div class="hero-pct">${(pct*100).toFixed(0)}% used${prev.hasData ? ` · ${deltaBadge(totalSpent, prev.total)} vs ${prev.label}` : ''}</div>
-    </div>
-  `;
-
-  // Animate the arcs in on next paint (CSS transitions handle the easing)
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    document.querySelectorAll('#heroRing .ring-arc-day, #heroRing .ring-arc-main').forEach(c => {
-      const t = parseFloat(c.dataset.target) || 0;
-      c.setAttribute('stroke-dasharray', `${t} ${(100 - t).toFixed(2)}`);
-    });
-  }));
-
-  document.getElementById('heroChips').innerHTML = `
-    <div class="hero-chip">
-      <div class="hero-chip-label">Daily Average</div>
-      <div class="hero-chip-value">$${fmt(dailyAvg)}</div>
-      <div class="hero-chip-sub">Day ${dayOfMonth} of ${days}</div>
-    </div>
-    <div class="hero-chip">
-      <div class="hero-chip-label">Projected Month-End</div>
-      <div class="hero-chip-value ${projected > totalBudget ? 'orange' : 'green'}">$${fmt(projected)}</div>
-      <div class="hero-chip-sub">at current pace</div>
-    </div>
-  `;
-
-  // Card breakdown
-  const cardTotals = {};
-  state.cards.forEach(c => cardTotals[c] = 0);
-  txns.forEach(t => { if (cardTotals[t.card] !== undefined) cardTotals[t.card] += t.amount; });
-  const cardsHtml = state.cards.map(card => {
-    const data = cardData(card, txns, cardTotals);
-    const colorVar = `--card-color: ${state.cardColor[card] || 'var(--border)'};`;
-    const badgeHtml = `<span class="txn-card-badge ${CARD_CLASS[card] || ''}" ${cardBadgeStyle(card)}>${card}</span>`;
-    const safeCard = escHtml(card);
-    const cardJs   = card.replace(/'/g, "\\'");
-    const hasBack  = data.miles.length > 0;
-    const rulesBtn = hasBack
-      ? `<button class="card-rules-btn" onclick="event.stopPropagation(); flipCard(this.closest('.card-stat'))" title="See rules" aria-label="See rules">ⓘ</button>`
-      : '';
-    const frontInner = `
-      ${rulesBtn}
-      <div class="card-name">${badgeHtml}</div>
-      <div class="card-total" style="margin-top:8px;">$${fmt(data.total)}</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:2px;">${data.txnCount} txn${data.txnCount===1?'':'s'}</div>
-      ${data.miles.map(renderMilesRow).join('')}
-    `;
-    if (!hasBack) {
-      return `<div class="card-stat" data-card="${safeCard}" style="${colorVar}" onclick="openTxnsForCard('${cardJs}')" title="View state.transactions on ${safeCard}">${frontInner}</div>`;
-    }
-    const backInner = `
-      <div class="card-back-title">${badgeHtml} <span style="color:var(--small);font-weight:400;margin-left:6px;">rules</span></div>
-      ${data.miles.map(m => `
-        <div class="card-back-rule">
-          <div class="card-back-rule-title">${m.label} · ${m.rate}</div>
-          <div class="card-back-rule-text">${m.note}</div>
-        </div>
-      `).join('')}
-      <div class="card-back-hint">tap to flip back ↺</div>
-    `;
-    return `
-      <div class="card-stat has-back" data-card="${safeCard}" style="${colorVar}">
-        <div class="card-faces">
-          <div class="card-face card-front" onclick="openTxnsForCard('${cardJs}')" title="View state.transactions on ${safeCard}">${frontInner}</div>
-          <div class="card-face card-back"  onclick="flipCard(this.closest('.card-stat'))" title="Tap to flip back">${backInner}</div>
-        </div>
-      </div>
-    `;
-  }).join('');
-  const addTile = `
-    <div class="card-stat add-card-tile" onclick="openAddCardModal()" title="Add a new card">
-      <div class="add-card-plus">＋</div>
-      <div class="add-card-label">Add card</div>
-    </div>
-  `;
-  document.getElementById('cardBreakdown').innerHTML = cardsHtml + addTile;
-
-  // Miles is now folded into each card's flip face — no standalone section.
-
-  // Budget bars
-  const spentByCategory = {};
-  CATEGORIES.forEach(c => spentByCategory[c.name] = 0);
-  txns.forEach(t => { if (spentByCategory[t.category] !== undefined) spentByCategory[t.category] += t.amount; });
-
-  document.getElementById('budgetGrid').innerHTML = CATEGORIES.map(cat => {
-    const spent = spentByCategory[cat.name] || 0;
-    const bud   = state.budgets[cat.name] || cat.budget;
-    const pct   = bud > 0 ? Math.min(spent / bud, 1) : 0;
-    const over  = spent > bud;
-    const warn  = spent > bud * 0.8;
-    const barClass = over ? 'red' : warn ? 'orange' : 'green';
-    const tagClass = cat.fixed ? 'tag-fixed' : over ? 'tag-over' : warn ? 'tag-warn' : 'tag-ok';
-    const tagText  = cat.fixed ? 'Fixed' : over ? 'Over' : warn ? 'Near limit' : 'On track';
-    const catJs = cat.name.replace(/'/g, "\\'");
-    return `
-      <div class="budget-item" style="--cat-color: ${cat.color || 'var(--border)'}; cursor: pointer;" onclick="openTxnsForCategory('${catJs}')" title="View ${escHtml(cat.name)} state.transactions">
-        <div class="budget-header">
-          <div>
-            <div class="budget-cat"><span class="budget-emoji">${cat.emoji}</span>${cat.name}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-            <span class="budget-tag ${tagClass}">${tagText}</span>
-            <div class="budget-amounts"><strong>$${fmt(spent)}</strong>of $${fmt(bud)}</div>
-          </div>
-        </div>
-        <div class="progress-track"><div class="progress-bar ${barClass}" style="width:${(pct*100).toFixed(1)}%"></div></div>
-        <div class="budget-footer">
-          <span>${(pct*100).toFixed(0)}% used</span>
-          <span>${over ? '⚠️ $'+fmt(spent-bud)+' over' : '$'+fmt(bud-spent)+' left'}</span>
-        </div>
-        ${prev.hasData ? `<div class="budget-mom">${deltaBadge(spent, prev.byCategory[cat.name] || 0)} <span style="color:var(--small);">vs ${prev.label} ($${fmt(prev.byCategory[cat.name] || 0)})</span></div>` : ''}
-      </div>
-    `;
-  }).join('');
-}
-
-// ─── Miles Tracker ────────────────────────────────────────────────────────────
-
-function milesPanel({ id, label, subLabel, badgeClass, card, spent, threshold, rate, note, isAnnual }) {
-  const cardColor = state.cardColor[card] || 'var(--border)';
-  const pct = threshold > 0 ? Math.min(spent / threshold, 1) : 0;
-  const hit = spent >= threshold;
-  const close = !hit && spent >= threshold * 0.75;
-  const barClass = hit ? 'green' : close ? 'orange' : 'red';
-  const badgeCls = hit ? 'hit' : close ? 'close' : 'miss';
-  const badgeText = hit ? '✅ Cap Hit' : close ? '⚡ Almost' : '❌ Not Yet';
-  const remaining = Math.max(threshold - spent, 0);
-  const periodLabel = isAnnual ? 'this year' : 'this month';
-  return `
-    <div class="miles-card" data-miles-id="${id}" style="--card-color: ${cardColor};">
-      <div class="miles-card-header">
-        <div>
-          <div class="miles-card-name">
-            <span class="txn-card-badge ${badgeClass}" style="font-size:12px;padding:3px 10px;">${label}</span>
-          </div>
-        </div>
-        <span class="miles-badge ${badgeCls}">${badgeText}</span>
-      </div>
-      <div class="miles-amounts">
-        <div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">Spent ${periodLabel}</div>
-          <div class="spent-val" style="color:${hit ? 'var(--green)' : 'var(--text)'}">$${fmt(spent)}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">${isAnnual ? 'Annual min' : 'Monthly cap'}</div>
-          <div class="miles-cap-val" style="font-size:18px;font-weight:700;color:var(--muted);">$${fmt(threshold)}</div>
-        </div>
-      </div>
-      <div class="miles-progress-track">
-        <div class="miles-progress-bar ${barClass}" style="width:${(pct*100).toFixed(1)}%"></div>
-      </div>
-      <div class="miles-footer">
-        <span>${(pct*100).toFixed(0)}% to ${isAnnual ? 'minimum' : 'cap'}</span>
-        <span>${hit ? (isAnnual ? '🎉 Bonus unlocked!' : '🎉 Cap maxed!') : 'Need $'+fmt(remaining)+' more'}</span>
-      </div>
-      <div class="miles-card-note">${rate} · ${note}</div>
-    </div>
-  `;
-}
-
-function renderMilesTracker(txns, cardTotals) {
-  // HSBC: total HSBC spend this month
-  const hsbcSpent = cardTotals?.['HSBC Revolution'] || 0;
-
-  // UOB Lady's Fashion: UOB Lady's card + fashion-mapped categories
-  const fashionSet = new Set(state.milesConfig.fashionCats);
-  const uobFashion = txns.filter(t => t.card === "UOB Lady's" && fashionSet.has(t.category))
-                         .reduce((s, t) => s + t.amount, 0);
-
-  // UOB Lady's Dining: UOB Lady's card + dining-mapped categories
-  const diningSet = new Set(state.milesConfig.diningCats);
-  const uobDining = txns.filter(t => t.card === "UOB Lady's" && diningSet.has(t.category))
-                        .reduce((s, t) => s + t.amount, 0);
-
-  // KrisFlyer: all UOB KrisFlyer spend year-to-date
-  const kfYTD = getKrisFlyerYTD();
-
-  const panels = {
-    'hsbc': milesPanel({
-      id: 'hsbc',
-      label: 'HSBC Revolution',
-      subLabel: 'Monthly cap — dining, shopping, transport, online',
-      badgeClass: 'card-hsbc',
-      card: 'HSBC Revolution',
-      spent: hsbcSpent,
-      threshold: state.milesConfig.hsbc,
-      rate: '4 mpd',
-      note: 'Contactless + online spend. Excludes SimplyGo, fast food delivery, OTAs.',
-      isAnnual: false,
-    }),
-    'uob-fashion': milesPanel({
-      id: 'uob-fashion',
-      label: "UOB Lady's · Fashion",
-      subLabel: state.milesConfig.fashionCats.join(' · '),
-      badgeClass: 'card-uob-lady',
-      card: "UOB Lady's",
-      spent: uobFashion,
-      threshold: state.milesConfig.uobLadyFashion,
-      rate: '4 mpd',
-      note: 'Tracks UOB Lady\'s card spend in Fashion-mapped categories.',
-      isAnnual: false,
-    }),
-    'uob-dining': milesPanel({
-      id: 'uob-dining',
-      label: "UOB Lady's · Dining",
-      subLabel: state.milesConfig.diningCats.join(' · '),
-      badgeClass: 'card-uob-lady',
-      card: "UOB Lady's",
-      spent: uobDining,
-      threshold: state.milesConfig.uobLadyDining,
-      rate: '4 mpd',
-      note: 'Tracks UOB Lady\'s card spend in Dining-mapped categories.',
-      isAnnual: false,
-    }),
-    'kf': milesPanel({
-      id: 'kf',
-      label: 'UOB KrisFlyer',
-      subLabel: 'Annual SIA Group minimum · Jan–Dec ' + new Date().getFullYear(),
-      badgeClass: 'card-uob-kf',
-      card: 'UOB KrisFlyer',
-      spent: kfYTD,
-      threshold: state.milesConfig.kfAnnual,
-      rate: '3 mpd on SQ/Scoot',
-      note: 'Tracks all UOB KrisFlyer card spend YTD. Must hit $' + state.milesConfig.kfAnnual + '/year to unlock 2.4 mpd bonus.',
-      isAnnual: true,
-    }),
-  };
-
-  // Apply saved order: ids in saved order first, then any not-yet-ordered ones.
-  const defaultOrder = Object.keys(panels);
-  const saved = loadMilesOrder();
-  const final = [];
-  saved.forEach(id => { if (panels[id] && !final.includes(id)) final.push(id); });
-  defaultOrder.forEach(id => { if (!final.includes(id)) final.push(id); });
-
-  document.getElementById('milesGrid').innerHTML = final.map(id => panels[id]).join('');
-}
-
-// ─── Transactions ─────────────────────────────────────────────────────────────
-function renderTransactions() {
-  const search = (document.getElementById('txnSearch')?.value || '').toLowerCase();
-  const filterCat = document.getElementById('txnFilter')?.value || '';
-  const filterCard = document.getElementById('txnCardFilter')?.value || '';
-
-  // Populate filter options once
-  const sel = document.getElementById('txnFilter');
-  if (sel && sel.options.length <= 1) {
-    CATEGORIES.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c.name; opt.textContent = c.name;
-      sel.appendChild(opt);
-    });
-  }
-
-  let txns = [...currentTxns()].sort((a, b) => b.date.localeCompare(a.date));
-  if (search) txns = txns.filter(t => t.merchant.toLowerCase().includes(search) || t.category.toLowerCase().includes(search));
-  if (filterCat) txns = txns.filter(t => t.category === filterCat);
-  if (filterCard) txns = txns.filter(t => t.card === filterCard);
-
-  // Filtered total — reflects whatever search/category/card filters are active
-  const totEl = document.getElementById('txnTotalAmount');
-  if (totEl) {
-    const total = txns.reduce((s, t) => s + (t.amount || 0), 0);
-    totEl.innerHTML = `$${fmt(total)}<span class="txn-total-count"> · ${txns.length} txn${txns.length === 1 ? '' : 's'}</span>`;
-  }
-
-  const body = document.getElementById('txnListBody');
-  if (txns.length === 0) {
-    body.innerHTML = `<div class="empty">🧾<p>No state.transactions yet for ${monthLabel()}</p></div>`;
-    return;
-  }
-
-  body.innerHTML = txns.map(t => {
-    const mccName = t.mcc ? mccDisplayName(t.mcc) : '';
-    const mccBadge = t.mcc
-      ? `<span class="txn-mcc-badge" title="${mccName ? escHtml(mccName) : 'MCC ' + t.mcc}">${t.mcc}${mccName ? ' · ' + escHtml(mccName) : ''}</span>`
-      : '';
-    const miss = getMissedBonus(t);
-    const missBadge = miss
-      ? `<span class="txn-miss-badge txn-miss-${miss.severity}" title="${escHtml(miss.reason)}">${miss.label}</span>`
-      : '';
-    const subline = (mccBadge || missBadge)
-      ? `<br><span class="txn-subline">${mccBadge}${missBadge}</span>`
-      : '';
-    return `
-    <div class="txn-row">
-      <span class="txn-date">${formatDate(t.date)}</span>
-      <span class="txn-merchant">${escHtml(t.merchant)}${subline}</span>
-      <span><span class="txn-cat-badge">${CATEGORIES.find(c=>c.name===t.category)?.emoji||''} ${t.category}</span></span>
-      <span><span class="txn-card-badge ${CARD_CLASS[t.card] || ''}" ${cardBadgeStyle(t.card)}>${t.card}</span></span>
-      <span class="txn-amount">$${fmt(t.amount)}</span>
-      <span class="txn-row-actions">
-        <button class="btn-edit" onclick="openEditTxn('${t.id}')" title="Edit">✎</button>
-        <button class="btn-del" onclick="deleteTxn('${t.id}')" title="Delete">✕</button>
-      </span>
-    </div>
-  `;}).join('');
-}
-
-function deleteTxn(id) {
-  const key = storageKey(state.currentYear, state.currentMonth);
-  state.transactions[key] = (state.transactions[key] || []).filter(t => t.id !== id);
-  saveTransactions();
-  renderAll();
-  toast('Transaction deleted');
-}
-
-// ─── Settings ────────────────────────────────────────────────────────────────
-function renderSettings() {
-  const table = document.getElementById('settingsTable');
-  table.innerHTML = `
-    <tr><th>Category</th><th>Type</th><th style="text-align:right">Monthly Budget (SGD)</th></tr>
-    ${CATEGORIES.map(cat => `
-      <tr>
-        <td>${cat.emoji} ${cat.name}</td>
-        <td>${cat.fixed ? '<span class="fixed-badge">Fixed</span>' : '<span style="font-size:11px;color:var(--muted)">Discretionary</span>'}</td>
-        <td style="text-align:right">
-          <input type="number" id="bud_${cat.name.replace(/\W/g,'_')}"
-            value="${state.budgets[cat.name] || cat.budget}" min="0" step="1"
-            ${cat.fixed ? 'style="opacity:0.5"' : ''}>
-        </td>
-      </tr>
-    `).join('')}
-  `;
-}
-
-function renderMilesSettings() {
-  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
-  set('miles_hsbc', state.milesConfig.hsbc);
-  set('miles_uob_fashion', state.milesConfig.uobLadyFashion);
-  set('miles_uob_dining', state.milesConfig.uobLadyDining);
-  set('miles_kf_annual', state.milesConfig.kfAnnual);
-  set('miles_fashion_cats', (state.milesConfig.fashionCats || []).join(', '));
-  set('miles_dining_cats', (state.milesConfig.diningCats || []).join(', '));
-}
-
-function saveMilesSettings() {
-  const get = (id, def) => parseFloat(document.getElementById(id)?.value) || def;
-  const getCats = (id, def) => {
-    const v = document.getElementById(id)?.value || '';
-    const parsed = v.split(',').map(s => s.trim()).filter(Boolean);
-    return parsed.length ? parsed : def;
-  };
-  state.milesConfig = {
-    hsbc: get('miles_hsbc', 1000),
-    uobLadyFashion: get('miles_uob_fashion', 750),
-    uobLadyDining: get('miles_uob_dining', 750),
-    kfAnnual: get('miles_kf_annual', 1000),
-    fashionCats: getCats('miles_fashion_cats', ['Luxury Fashion', 'Clothing & Apparel']),
-    diningCats: getCats('miles_dining_cats', ['Fine Dining', 'Casual Dining', 'Cafes & Coffee']),
-  };
-  localStorage.setItem(milesKey(), JSON.stringify(state.milesConfig));
-  triggerSyncPush();
-  renderDashboard();
-  toast('Miles settings saved ✓');
-}
-
-function saveBudgets() {
-  CATEGORIES.forEach(cat => {
-    const id = `bud_${cat.name.replace(/\W/g,'_')}`;
-    const el = document.getElementById(id);
-    if (el) state.budgets[cat.name] = parseFloat(el.value) || 0;
-  });
-  localStorage.setItem(budgetKey(), JSON.stringify(state.budgets));
-  triggerSyncPush();
-  renderDashboard();
-  toast('Budgets saved ✓');
-}
 
 
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
 function clearMonth() {
-  if (!confirm(`Clear all state.transactions for ${monthLabel()}? This cannot be undone.`)) return;
+  if (!confirm(`Clear all transactions for ${monthLabel()}? This cannot be undone.`)) return;
   const key = storageKey(state.currentYear, state.currentMonth);
   state.transactions[key] = [];
   saveTransactions();
@@ -1364,13 +598,6 @@ function exportData() {
   toast('Backup downloaded');
 }
 
-function toast(msg) {
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2500);
-}
-
-function closeModalOutside(e, id) { if (e.target.classList.contains('overlay')) document.getElementById(id).style.display = 'none'; }
 
 function renderAll() {
   syncMonthPicker();
@@ -1472,6 +699,27 @@ setAddTxnContext({
   saveTransactions: () => saveTransactions(),
   renderAll: () => renderAll(),
   toast: (msg) => toast(msg),
+});
+setMonthBarContext({
+  loadData: () => loadData(),
+  renderAll: () => renderAll(),
+});
+setCarouselContext({
+  showPage: (n, el) => showPage(n, el),
+});
+setDashboardContext({
+  currentTxns: () => currentTxns(),
+  syncMonthPicker: () => syncMonthPicker(),
+});
+setTransactionsContext({
+  currentTxns: () => currentTxns(),
+  monthLabel: () => monthLabel(),
+  saveTransactions: () => saveTransactions(),
+  renderAll: () => renderAll(),
+  toast: (msg) => toast(msg),
+});
+setSettingsContext({
+  renderDashboard: () => renderDashboard(),
 });
 
 // ─── Inline-handler compatibility shim ───────────────────────────────────────
